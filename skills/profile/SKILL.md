@@ -1,6 +1,6 @@
 ---
 name: profile
-description: Show or switch the xend profile (lite, balanced, aggressive) for new sessions.
+description: Show or switch the xend profile (lite, balanced, aggressive).
 argument-hint: "[lite|balanced|aggressive]"
 disable-model-invocation: true
 allowed-tools: Bash(node *)

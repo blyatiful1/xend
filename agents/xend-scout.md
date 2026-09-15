@@ -1,6 +1,6 @@
 ---
 name: xend-scout
-description: Cheap read-only code locator for bulk exploration (five or more files to scan, or an unfamiliar area of a repo). Returns path:line citations only; its reads never enter the caller's context. Not for a single known symbol, which a direct Grep finds faster.
+description: Read-only locator for bulk exploration (five or more files, or an unfamiliar area); returns path:line citations only. Not for a single known symbol.
 model: haiku
 effort: low
 tools: Read, Glob, Grep

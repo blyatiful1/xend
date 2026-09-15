@@ -1,6 +1,6 @@
 ---
 name: xend-reader
-description: Cheap condenser for one large artifact (a log or output of thousands of lines, a big config, a generated file). Reads all of it so the caller does not have to, and returns a short brief with the decisive lines quoted verbatim. Not for files the caller will edit next.
+description: Condenses one large artifact (long log or output, big config, generated file) into a brief with decisive lines quoted verbatim. Not for files the caller will edit next.
 model: haiku
 effort: low
 tools: Read, Grep, Glob, Bash

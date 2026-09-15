@@ -1,6 +1,6 @@
 ---
 name: checkpoint
-description: Save a compact checkpoint (decisions, open items, files touched, verification commands) so it survives /clear or /compact. Run it before clearing context between tasks.
+description: Save a checkpoint (decisions, open items, files, commands) that survives /clear or /compact.
 argument-hint: "[optional notes]"
 disable-model-invocation: true
 allowed-tools: Bash(node *)

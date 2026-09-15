@@ -1,6 +1,6 @@
 ---
 name: xend-worker
-description: Implements a fully specified, testable change and returns a diff summary plus test results. Use only when the caller can state the files, the exact behavior, and the verification command, and the work is large enough to justify a fresh context (many files or a long test loop). Not for ambiguous, cross-cutting, or small work.
+description: Implements a fully specified, testable change large enough to justify a fresh context; returns a diff summary and test results. Not for ambiguous, cross-cutting, or small work.
 model: sonnet
 effort: medium
 maxTurns: 60

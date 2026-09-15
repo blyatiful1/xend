@@ -1,6 +1,6 @@
 ---
 name: terse
-description: Set the xend output style level for this session (lite, full, ultra, off). Caveman-compatible terse mode that cuts prose tokens while keeping code, errors, and numbers exact.
+description: Set the xend terse output level for this session: lite, full, ultra, or off.
 argument-hint: "[lite|full|ultra|off]"
 disable-model-invocation: true
 allowed-tools: Bash(node *)

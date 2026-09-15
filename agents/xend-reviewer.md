@@ -1,6 +1,6 @@
 ---
 name: xend-reviewer
-description: Reviews a diff or a set of files for defects and returns findings only (no rewrite, no praise). Use after a substantial change (several files or a long diff) for a second look before the caller verifies it.
+description: Reviews a substantial diff or file set for defects; returns findings only, no rewrite.
 model: sonnet
 effort: medium
 tools: Read, Grep, Glob, Bash

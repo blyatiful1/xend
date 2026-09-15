@@ -1,6 +1,6 @@
 ---
 name: doctor
-description: Audit this environment for token waste (memory files, settings, MCP servers, hooks, recent cache hit ratio) and print ranked fixes. Offline, no API calls.
+description: Offline audit of token waste (memory files, settings, MCP servers, hooks, cache hit ratio) with ranked fixes.
 disable-model-invocation: true
 allowed-tools: Bash(node *)
 ---

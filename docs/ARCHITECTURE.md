@@ -82,7 +82,7 @@ Invariants:
 
 ## Session context injected at SessionStart
 
-One stable block (~600 tokens, no timestamps, no per-turn re-injection so the prompt cache stays warm; together with seven short skill descriptions and four agent descriptions the plugin's fixed prefix is about 1,000 tokens, roughly 3% of a typical 32,000-token prefix):
+One stable block (~410 tokens after trimming, no timestamps, no per-turn re-injection so the prompt cache stays warm; together with seven short skill descriptions and four agent descriptions the plugin's fixed prefix is about 765 tokens, roughly 2.4% of a typical 32,000-token prefix; the benchmark showed that even this is not amortized on five-turn tasks):
 - terse rules for the active level and their exemptions (security warnings, ordered instructions,
   anything persisted outside chat stays in full prose),
 - reading discipline (grep before read, ranged reads, no re-reads of unchanged files, delegate

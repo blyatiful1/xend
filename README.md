@@ -63,16 +63,17 @@ Honest numbers beat advertised ones. Independent measurements of the techniques 
 - Masking old tool results: 52% cheaper with a slightly higher solve rate on SWE-bench Verified (JetBrains Research). xend enables Anthropic's server-side version in the `aggressive` profile.
 - Prompt caching: the fixed prefix measured here was 32,062 tokens per request; cache reads cost a tenth of a miss. Nothing xend injects varies between turns.
 
-xend's own first full run (16 tasks, Claude Sonnet 5 at low effort, one trial per arm):
+xend's own paired runs (Claude Sonnet 5 at low effort, same tasks under both arms; `bench/results/`):
 
-| | baseline | xend |
-|---|---|---|
-| pass rate | 93.8% | 93.8% |
-| output tokens | | -9.0% |
-| turns per task | 4.8 | 4.6 |
-| cost per task | $0.106 | $0.103 |
+| Run | Tasks x trials | Pass rate (baseline -> xend) | Output tokens | Turns | Cost per task |
+|---|---|---|---|---|---|
+| r1, pre-review defaults | 16 x 1 | 93.8% -> 93.8% | -9.0% | 4.8 -> 4.6 | -2.2% |
+| r2, revised defaults | 21 x 2 | 90.5% -> 95.2% | -3.2% | 4.5 -> 4.6 | **+9.0%** (95% CI +6.1% to +11.9%) |
+| r3, trimmed prefix | 21 x 1 | see `bench/results/full-r3-balanced-trimmed/report.md` | | | |
 
-Savings scale with session length and tool-output volume: the reading-heavy log task went from 8 turns and 455k tokens to 4 turns and 206k; five-turn bugfix tasks paid about 2% for the plugin's own prefix. One run of 16 tasks cannot certify a 3-point quality bound (it can detect roughly a 12-20 point drop); the bench reports its minimum detectable effect and merges evidence across runs. See `bench/README.md`.
+Read r2 carefully, because it is the kind of number this project exists to surface. Quality was never worse on any task and improved on two. But these tasks average 4.5 turns, the plugin's fixed prefix (session block plus skill and agent descriptions) is cache-written once per session and not amortized over so few turns, and the shaping layer had something to condense on one task out of 21. The gate therefore returns **FAIL on cost** for micro-tasks, exactly as rtk's independent benchmark did for rtk. Where xend does win is longer and reading-heavier work: in r1 the log-analysis task went from 8 turns and 455k tokens to 4 turns and 206k, and the navigation task in r2 used 23% fewer tokens with one turn less. After r2 the prefix was cut by roughly 40% (r3 measures the effect), and the levers the bench cannot see at all (cache TTL across pauses, MCP output caps, compaction avoidance through checkpoints and `/clear`, deferred tool schemas) are applied through `/xend:setup` and `/xend:doctor`.
+
+The practical guidance that follows from the data: install xend for sessions that read a lot or run long, use `/xend:doctor` and `/xend:setup` for the native levers, and do not expect savings on five-turn micro-tasks. A 21-task suite cannot certify a 3-point quality bound (it detects roughly an 8-point drop); the bench reports its minimum detectable effect and merges evidence across runs. See `bench/README.md`.
 
 ## Quality guarantees
 

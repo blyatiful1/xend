@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Apply an xend profile (lite, balanced, aggressive) and optionally the recommended native Claude Code settings, with a backup and a printed diff.
+description: Apply an xend profile and recommended native settings, with backup and diff.
 argument-hint: "[lite|balanced|aggressive] [--with-recommended] [--compact-instructions] [--dry-run] [--undo]"
 disable-model-invocation: true
 allowed-tools: Bash(node *)
