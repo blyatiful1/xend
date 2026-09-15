@@ -1,0 +1,8 @@
+{
+  "name": "bugfix-pagination-offset",
+  "category": "bugfix",
+  "difficulty": 1,
+  "prompt": "The `paginate` function in `paginate.py` is supposed to return the 1-indexed page of size `page_size` from `items`, but `test_paginate.py` currently fails. Fix the bug in `paginate.py` so all tests in `test_paginate.py` pass. Do not modify the test file.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

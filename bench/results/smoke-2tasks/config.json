@@ -1,0 +1,27 @@
+{
+  "opts": {
+    "arms": [
+      "baseline",
+      "xend"
+    ],
+    "runs": 1,
+    "model": "sonnet",
+    "effort": "low",
+    "tasks": "bugfix-pagination-offset,reading-log-needle",
+    "category": "",
+    "concurrency": 2,
+    "maxBudget": 1.5,
+    "profile": "balanced",
+    "out": "bench/results/smoke-2tasks",
+    "keep": false,
+    "dryRun": false,
+    "list": false,
+    "extra": []
+  },
+  "tasks": [
+    "bugfix-pagination-offset",
+    "reading-log-needle"
+  ],
+  "claude_version": "2.1.272 (Claude Code)",
+  "started": "2026-09-15T08:11:05.708Z"
+}

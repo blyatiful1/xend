@@ -1,0 +1,8 @@
+{
+  "name": "feature-cli-json",
+  "category": "feature",
+  "difficulty": 2,
+  "prompt": "Add a `--json` flag to the CLI in `wc_cli.py`. Without `--json`, keep the existing plain-text output exactly as it is today. When `--json` is passed, instead of the plain-text lines, print a single line to stdout containing valid JSON (parseable by `json.loads`) with exactly three keys - `lines`, `words`, `chars` - as integers, and print nothing else to stdout in that mode. Usage stays `python3 wc_cli.py [--json] <path>`.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

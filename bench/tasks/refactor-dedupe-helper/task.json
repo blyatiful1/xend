@@ -1,0 +1,8 @@
+{
+  "name": "refactor-dedupe-helper",
+  "category": "refactor",
+  "difficulty": 2,
+  "prompt": "`orders.py` has near-duplicated pricing logic in `total_for_member` and `total_for_guest` (both compute the same subtotal/bulk-discount/tax calculation). Extract that shared calculation into a single helper function and have both functions call it, without changing either function's observable behavior: `total_for_member` still returns the discounted total plus tax, and `total_for_guest` still returns that same amount plus a flat $2.00 service fee. Keep the public function names and signatures (`total_for_member(items, discount_rate)` and `total_for_guest(items, discount_rate)`) unchanged.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

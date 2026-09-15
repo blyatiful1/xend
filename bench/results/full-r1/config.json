@@ -1,0 +1,41 @@
+{
+  "opts": {
+    "arms": [
+      "baseline",
+      "xend"
+    ],
+    "runs": 1,
+    "model": "sonnet",
+    "effort": "low",
+    "tasks": "*",
+    "category": "",
+    "concurrency": 3,
+    "maxBudget": 1.5,
+    "profile": "balanced",
+    "out": "bench/results/full-r1",
+    "keep": false,
+    "dryRun": false,
+    "list": false,
+    "extra": []
+  },
+  "tasks": [
+    "bugfix-date-range",
+    "bugfix-mutable-default",
+    "bugfix-pagination-offset",
+    "bugfix-retry-swallowed",
+    "feature-cli-json",
+    "feature-input-validation",
+    "feature-lru-cache",
+    "navigation-find-constant",
+    "navigation-rename-function",
+    "qa-parse-record-impact",
+    "qa-retry-config",
+    "reading-big-file-edit",
+    "reading-config-drift",
+    "reading-log-needle",
+    "reading-test-triage",
+    "refactor-dedupe-helper"
+  ],
+  "claude_version": "2.1.272 (Claude Code)",
+  "started": "2026-09-15T08:13:07.297Z"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "reading-test-triage",
+  "category": "reading",
+  "difficulty": 3,
+  "prompt": "Run the test suite for this project (pytest, or `python3 -m unittest discover -s tests` if pytest isn't available) and you'll find 2 of the ~120 generated tests in `tests/test_generated.py` fail. All the failures trace back to a single real bug in one function in `calc_pkg/mathutils.py`. Find and fix that bug so every test passes. Do not modify anything under `tests/`.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

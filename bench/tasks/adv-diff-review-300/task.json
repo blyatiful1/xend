@@ -1,0 +1,8 @@
+{
+  "name": "adv-diff-review-300",
+  "category": "qa",
+  "difficulty": 3,
+  "prompt": "Review changes.diff and tell me which file and function contains a bug and what the bug is.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

@@ -1,0 +1,8 @@
+{
+  "name": "bugfix-mutable-default",
+  "category": "bugfix",
+  "difficulty": 2,
+  "prompt": "The `add_item` function in `cart.py` is meant to add an item to a cart list and return it, but `test_cart.py` fails because carts from unrelated calls are leaking items into each other. Fix the bug in `cart.py` so all tests in `test_cart.py` pass. Do not modify the test file.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

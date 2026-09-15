@@ -1,0 +1,8 @@
+{
+  "name": "feature-input-validation",
+  "category": "feature",
+  "difficulty": 2,
+  "prompt": "`createUser` in `validate_user.js` currently accepts any input without validation. Add validation, checked in this order - name, then email, then age - so it throws a plain `Error` with exactly one of these messages: \"name is required\" if `data.name` is missing or an empty/whitespace-only string; \"email is invalid\" if `data.email` is missing or does not contain an \"@\"; \"age must be a non-negative integer\" if `data.age` is missing, not an integer, or negative. When every field is valid, it should still return `{ name, email, age }` exactly as before.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

@@ -1,0 +1,8 @@
+{
+  "name": "navigation-rename-function",
+  "category": "navigation",
+  "difficulty": 2,
+  "prompt": "Rename the function `calc_total` (defined in `pricing/core.py`) to `compute_total_with_tax` everywhere it appears in this project - `pricing/core.py`, `pricing/order.py`, `pricing/invoice.py`, and `pricing/report.py` - updating the definition and every import/call site so the code keeps working exactly as before. The old name `calc_total` must not appear anywhere in the `pricing` package afterwards.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

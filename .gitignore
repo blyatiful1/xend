@@ -3,5 +3,9 @@ __pycache__/
 *.pyc
 .DS_Store
 .env
-bench/results/
 *.log
+bench/work/
+*.xend-backup-*
+# benchmark runs: keep runs.jsonl, config.json and reports; drop raw dumps and hook state
+bench/results/*/raw/
+bench/results/*/state/

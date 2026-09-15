@@ -1,0 +1,17 @@
+{
+  "name": "xend",
+  "version": "0.1.0",
+  "description": "Token-efficiency framework for Claude Code",
+  "license": "MIT",
+  "private": true,
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "doctor": "node scripts/doctor.js",
+    "stats": "node scripts/stats.js",
+    "bench": "node bench/run.js",
+    "bench:analyze": "node bench/analyze.js",
+    "bench:selftest": "bash bench/selftest.sh",
+    "validate": "claude plugin validate . --strict"
+  }
+}

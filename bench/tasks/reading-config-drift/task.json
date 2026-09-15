@@ -1,0 +1,8 @@
+{
+  "name": "reading-config-drift",
+  "category": "reading",
+  "difficulty": 2,
+  "prompt": "Config drift has been reported between staging and prod. Compare `config/staging.yaml` and `config/prod.yaml`. Per `config/README.md`, a small set of keys are allowed to differ between environments; every other key must match staging exactly. Fix `config/prod.yaml` so it is consistent with staging for every key that is not listed as an exception in the README. Do not touch the excepted keys, and do not modify `config/dev.yaml` or `config/staging.yaml`.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

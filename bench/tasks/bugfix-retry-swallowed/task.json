@@ -1,0 +1,8 @@
+{
+  "name": "bugfix-retry-swallowed",
+  "category": "bugfix",
+  "difficulty": 2,
+  "prompt": "`fetchWithRetry` in `retry.js` is supposed to call `operation()` and retry up to `maxAttempts` times if it throws, only propagating the final error once attempts are exhausted. Right now `node retry.test.js` fails - it looks like a single failed attempt aborts the whole retry loop instead of retrying. Fix the bug in `retry.js` so `node retry.test.js` passes. Do not modify the test file.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

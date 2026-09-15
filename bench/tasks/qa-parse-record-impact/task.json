@@ -1,0 +1,8 @@
+{
+  "name": "qa-parse-record-impact",
+  "category": "qa",
+  "difficulty": 2,
+  "prompt": "We're planning to change the return type of `parse_record` (defined in `record_parser.py`) from a tuple to a dict. Look through this project and, in your final reply, list exactly which files directly import `parse_record` from `record_parser.py` and call it - those are the files that would need to be updated. Don't include files that are unrelated or that merely define a similarly-named function of their own.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

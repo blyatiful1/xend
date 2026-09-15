@@ -1,0 +1,188 @@
+# xend research: where Claude Code tokens go, and what removes them without hurting quality
+
+This document is the evidence base behind xend. Every hypothesis states its mechanism, what xend
+does about it, the expected saving, the expected quality effect, an evidence grade, and how it is
+validated. Grades: **A** independent paired benchmark or deterministic pricing; **B** first-party or
+vendor measurement; **C** mechanistic argument only. Numbers measured in this repository's own
+environment are marked *(measured here)*.
+
+## 0. Summary
+
+1. In agentic coding, reading dominates writing. Roughly three quarters of the context window is
+   tool results the model reads; with caching each of those bytes is billed once at the write rate
+   and then at a tenth per turn, so it costs about a tenth of its face value per remaining turn and,
+   less visibly, brings compaction and context rot closer. Output-style tricks are real but small
+   (8.5% of output tokens, a few percent of cost); input-side work and turn counts are where the
+   money is.
+2. The largest input cost is structural: a fixed prefix (system prompt, tool schemas, memory files)
+   resent on every turn. *(measured here)*: 32,062 tokens per request in a connector-heavy
+   environment. Prompt caching reprices it to roughly a tenth; anything that breaks the cache costs
+   ten times more than it looks.
+3. Lossy filtering of what the model reads backfires. The one independent benchmark of a
+   command-rewriting filter (rtk) found +7.6% cost and +13.8% turns: the model re-ran commands to
+   see what was hidden. Condensation has to keep every signal line and name a recovery path.
+4. Masking *old* tool results beats summarizing them: 52% cheaper and +2.6 points solve rate on
+   SWE-bench Verified in JetBrains' study. Anthropic's server-side context editing implements
+   age-based masking and reports +29% task performance on long-horizon work. It can be turned on
+   inside Claude Code *(measured here)*, at the price of re-caching the remaining context on each
+   pass. Shaping a result at the moment it is produced is a different operation and is held to a
+   stricter rule: remove only what carries no decision-relevant information.
+7. The turn tax governs every transform. At Sonnet prices, shaping one oversized result is worth
+   about $0.05 over a session; one extra assistant turn costs about $0.03. A transform that causes
+   one extra turn per two uses is net negative, which is how rtk lost money while removing bytes.
+5. Cheaper models are safe exactly when their output is verified before it is trusted. Anthropic's
+   own numbers: an orchestrator with cheap workers wins only when there is bulk to hand off; a
+   single dependent chain is cheaper on one model.
+6. A 3% quality bound cannot be certified by a small one-shot suite. xend ships a paired benchmark
+   that reports its own minimum detectable effect and accumulates evidence across runs.
+
+## 1. Where the tokens go
+
+| Observation | Number | Source |
+|---|---|---|
+| Fixed prefix per request (system prompt + tool schemas + memory), typical connector-heavy setup | 32,062 tokens, 26,685 served from cache on a warm run | *(measured here)*, `claude -p --output-format json` |
+| Share of context spent reading code vs editing in a SWE agent (context composition, not billed share) | 76.1% reading, 11.8% editing | Mini-SWE-Agent profiling via [Towards Data Science](https://towardsdatascience.com/agentic-ai-how-to-save-on-tokens/) |
+| Tool schemas in one real subagent request | 219k of 267k characters | caveman `subagent-tax` report, [JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman) |
+| What dominates agentic output tokens | "code, diffs, tool invocations, and exact error strings"; narration is a small remainder | [JetBrains A/B, 86 tasks](https://blog.jetbrains.com/ai/2026/07/speak-to-ai-agents-like-cavemen-tosave-tokens/) |
+| Cost growth with turn count | each turn resends the whole conversation; cost grows roughly with the square of turns without caching | Anthropic cost guidance (claude-api skill, `cost-optimization.md`) |
+| Enterprise spend | ~$13 per developer per active day, $150-250 per month | [code.claude.com/docs/en/costs](https://code.claude.com/docs/en/costs) |
+
+Implication: the order of levers is (1) keep the cache warm, (2) shrink what is read, (3) shorten
+sessions and their context, (4) route bulky work to cheaper contexts, (5) only then shorten prose.
+
+## 2. External evidence
+
+| Study | Design | Result | Grade |
+|---|---|---|---|
+| JetBrains, caveman skill | SkillsBench, 86 tasks, paired, Claude Sonnet 5 at low effort, 3 runs, auto-graded 0-1 | -8.5% output tokens (advertised 65%); score 0.326 vs 0.311; sign test p = 0.82: no detectable quality change | A |
+| JetBrains, rtk | same harness, 425 billed trials | +7.6% cost at low effort (p = 0.004), +13.8% turns; break-even at high effort; hook touched ~20% of tool-result characters because Claude Code already truncates large output | A |
+| Adobe Research, CAVEWOMAN ([arXiv 2606.24083](https://arxiv.org/abs/2606.24083)) | 8 models, 5 datasets, 5 compression levels | output-side compression cuts realized cost 1.4-2.4x (up to 3x); compressing the *input* prompt raises net cost ~1.15x (up to 2.7x) and lowers accuracy: models answer longer and worse | A |
+| JetBrains Research, The Complexity Trap ([arXiv 2508.21433](https://arxiv.org/abs/2508.21433)) | SWE-bench Verified, 5 model configurations | observation masking (placeholders for old tool results) halves cost and matches or beats LLM summarization; +2.6% solve rate at 52% lower cost on one model; summarization extended trajectories 13-15% | A |
+| Anthropic, context editing + memory tool ([docs](https://platform.claude.com/docs/en/build-with-claude/context-editing)) | long-horizon agentic evaluation | +29% task performance with context editing, +39% with the memory tool added (a quality figure, not a cost figure; each clearing pass re-caches the remaining context) | B |
+| Chroma, Context Rot ([report](https://www.trychroma.com/research/context-rot)) | 18 models | reliability degrades with input length well before the window is full | A |
+| Lost in the Middle ([arXiv 2307.03172](https://arxiv.org/abs/2307.03172)) | position-controlled retrieval | information in the middle of long contexts is used worse | A |
+| cAST, AST-aware chunking | code retrieval + SWE-bench | 1.6-3.9x fewer tokens and +2.67 Pass@1 | A |
+| aider repo map ([post](https://aider.chat/2023/10/22/repomap.html)) | tree-sitter + PageRank map capped at ~1k tokens | higher edit accuracy than naive whole-file inclusion | B |
+| Anthropic effort sweeps (claude-api skill, `cost-optimization.md`) | coding and research benchmarks | long-horizon coding: about -2 points at `medium` for half the cost, -8 at `low` for a quarter; research: `medium` matches default at 70-85% of cost; re-running failures at higher effort gives the same pass rate at about half the cost | B |
+| Anthropic prompt caching ([docs](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)) | pricing | cache reads 0.1x input price (0.025x on Claude Fable 5.1), writes 1.25x (5 min) or 2x (1 h); agent-loop cost cut by 2.5-3.7x at 81-90% hit rates | A |
+| FrugalGPT ([arXiv 2305.05176](https://arxiv.org/abs/2305.05176)), RouteLLM ([arXiv 2406.18665](https://arxiv.org/abs/2406.18665)) | cascades and routers | up to 98% cost reduction at matched accuracy; routing keeps ~95% of quality, i.e. up to 5 points loss in some regimes; calibration is the failure mode | A/B |
+| caveman proxy benchmark | 54 runs, 6 reading-heavy cases, exact oracle | -33.2% input tokens overall; one case +9.9% (no transform applied, overhead only); 18/18 answers correct | B |
+| context-guard (archived) | maintainer's own A/B | "general token or cost savings were not established"; project discontinued | B (honest negative) |
+| SWE-Pruner ([arXiv 2601.16746](https://www.arxiv.org/pdf/2601.16746)) | goal-conditioned pruning with a 0.6B skimmer | 23-54% token reduction on SWE-bench-style tasks with minimal impact | B |
+
+## 3. Hypotheses
+
+Each entry: **mechanism** → **xend implementation** → expected saving → expected quality effect → grade → validation → status.
+
+**H1. Cache stability is the first lever.** Any byte that changes early in the prefix re-bills everything after it at full price. → xend injects one stable block at SessionStart (no timestamps, no per-turn injection), never switches the main model, and `/xend:doctor` flags hooks that inject dynamic text on every prompt and settings that change effort mid-session. → Saving: avoids paying up to 10x on the prefix; on a 32k prefix one avoided miss is worth ~29k tokens. → Quality: none. → Grade A (pricing is contractual). → Validation: `/xend:stats` cache hit ratio; bench records uncached input per task. → Status: shipped in all profiles.
+
+**H2. Recoverable shaping of tool results at creation time.** Remove escape codes, progress bars, repeated lines, known passing-test rows and install chatter; cut very long *generic* output (never diffs or test runs) to head and tail; keep every error, failure, diff, and summary line; persist the original and name it in a marker when at least 2,000 characters were removed. → xend PostToolUse hook with `updatedToolOutput` *(verified here: Claude Code 2.1.272 replaces the result the model sees)*; nothing is shaped inside subagents. → Saving: bounded by Claude Code's own 30,000-character cap (the hook can only remove what native truncation left) and by the turn tax; *(measured here)* a 3,000-line `cat` went from 25,892 to 8,416 characters. → Quality: neutral when the marker is self-explanatory and nothing decision-relevant is removed; the rtk result shows the failure mode otherwise (re-runs, more turns). → Grade C for the transforms themselves, with an A-grade negative result shaping the design. → Validation: bench reading and adversarial tasks, turn deltas, and the recovery rate (how often the model reads a persisted original back). → Status: noise-only in `lite`, structured in `balanced`; head/tail applies to generic output only.
+
+**H3. Identical repeats of a command are cheap to shorten.** A command re-run with byte-identical output carries one bit of information: unchanged. → Per-session registry keyed by command; a repeat of at least 2,000 characters within 12 tool calls keeps its first 10 lines plus a marker that says the rest is identical to the earlier call and that other state may still have changed; the registry resets on compact and clear. `Read` results are never shortened this way: a Read is the model's working copy and its next Edit must match the file on disk. → Saving: small; depends on re-run habits (`/xend:stats` reports re-runs). → Quality: neutral. → Grade C. → Validation: bench; stats. → Status: `lite` and `balanced`; off in `aggressive`, where server-side clearing could remove the referenced result.
+
+**H4. Server-side context editing (observation masking) for long sessions.** Anthropic's `clear_tool_uses` strategy clears old tool results after the cache lookup and before token counting. → `CLAUDE_CODE_EXTRA_BODY` carries the `context_management` body into every request *(verified here: the API reported `cleared_tool_uses: 3, cleared_input_tokens: 11,558` in a five-turn run)*. Defaults: trigger 110k input tokens, keep the 12 most recent tool uses (a file read the model still needs is the main risk of clearing too eagerly), clear at least 40k per pass, so passes are rare and large. → Saving: large on long sessions (masking halved cost in the JetBrains study), but each pass re-caches the remaining context: clearing 40k out of 110k re-writes ~70k at 1.25x to save 40k at 0.1x per later turn, a break-even of roughly 20 further turns. Sessions that end soon after a pass pay a penalty. The trigger is absolute, so on a 1M-context session it fires early. → Quality: neutral to positive (+2.6 points and +29% in the cited studies) provided cleared results are recoverable by re-reading files. → Grade A for masking, B for the Claude Code packaging. → Validation: long-session bench comparing cost and pass rate with and without, logging `applied_edits` next to cache-creation tokens. → Status: `aggressive` only, experimental; depends on an undocumented environment variable and on organization policy allowing experimental betas.
+
+**H5. Terse output style.** Drop articles, filler, hedging, narration, restated diffs and closing summaries; keep code, identifiers, errors, numbers and negations exact; write normal prose for anything persisted outside chat and for safety warnings. → Rules injected once per session (caveman-compatible levels `lite`, `full`, `ultra`; `/xend:terse` switches). → Saving: 8-10% of output tokens in agentic coding (JetBrains), up to 50% in chat-style Q&A (caveman's own eval vs a plain "be concise" control). → Quality: no detectable change (p = 0.82, n = 82). → Grade A. → Validation: bench Q&A tasks; output-token delta. → Status: `lite` level in `lite`, `full` in `balanced` and `aggressive`.
+
+**H6. Delegate bulky, verifiable work to cheaper models.** A Haiku scout that returns citations, a Haiku reader that condenses an artifact, a Sonnet worker for fully specified changes. → `agents/*.md` with `model:`/`effort:` frontmatter; `/xend:route` states the contract: accept only after verification, escalate one tier on failure, never switch the main model. → Saving: cost rather than tokens; the parent context absorbs a few hundred tokens instead of tens of thousands (Anthropic: a subagent doing 10k tokens of work that returns 500 saves 9.5k). → Quality: neutral when verified; the documented risk is confident wrong citations from small models, which verification catches. → Grade B. → Validation: bench navigation tasks; per-model usage in results. → Status: shipped; the model decides when to use them.
+
+**H7. Reading discipline and structure-first reading.** Locate before reading, read by range, never re-read unchanged files, verify edits with a diff. Structure-aware retrieval improves quality while cutting tokens (cAST, repo map). → Session rules; `xend-scout`; in `aggressive`, a PreToolUse hook turns an unranged Read of a file with 800+ lines into a ranged read of 250 lines with truthful `numLines`/`totalLines`, so the model continues by range. An earlier design that replaced the file content with a synthesized outline was dropped: a heuristic outline can miss a definition and read as "this symbol does not exist". → Saving: *(measured here)* the reading-discipline block alone took the log-needle task from 8 turns and 455k tokens to 4 turns and 206k; potentially the largest behavioral lever given the reading share. → Quality: positive in the retrieval literature; the range limiter risks one extra turn when the model needed a later part of the file. → Grade A for the principle, C for the specific transform. → Validation: bench big-file task; turn deltas. → Status: rules in all profiles; range limiter in `aggressive`. Structure-aware retrieval (enclosing-function expansion of grep hits, a repo map) is the next lever to build.
+
+**H8. Test-runner and package-manager noise.** Passing-test rows and dependency-resolution chatter carry no decision-relevant information; failures, tracebacks, warnings, skipped rows, the model's own debug prints and summary lines do. → Line classifiers that only drop known noise patterns (a drop-list, never "keep only known signal", which would drop the unknown), applied only to outputs of 60+ lines because default runner modes have little to remove. Anthropic's costs page ships the same idea as a grep filter. → Saving: proportional to suite size in verbose modes. → Quality: neutral by construction for known runners; the adversarial print-debugging task checks that debug output survives. → Grade B for the idea, C for the classifiers. → Validation: unit tests on pytest, jest, go test, cargo, unittest, mocha samples; bench test-triage and print-debugging tasks. → Status: `balanced`.
+
+**H9. MCP schemas and outputs.** Tool schemas sit at position zero of the prefix; MCP results default to a 25,000-token cap. → Claude Code's native tool search already defers schemas (~95% reduction per Anthropic's docs); xend's doctor flags servers, `ENABLE_TOOL_SEARCH=false`, and unset `MAX_MCP_OUTPUT_TOKENS`; `/xend:setup --with-recommended` sets the cap to 10,000; MCP text results are shaped like Bash output. → Saving: large where many servers are configured. → Quality: neutral. → Grade B. → Status: shipped as audit plus setting.
+
+**H10. Memory-file hygiene.** CLAUDE.md files load every session; Anthropic's guidance is under 200 lines per file, with workflow detail moved to on-demand skills. Compressing them into telegraphic prose is a different matter: CAVEWOMAN shows compressed *instructions* make models answer longer and worse, so xend audits size and duplication but does not rewrite prose. → doctor reports lines, estimated tokens, duplicates and cache-breaking dynamic lines. → Saving: proportional to bloat. → Quality: neutral (structural only). → Grade B. → Status: shipped as audit.
+
+**H11. Effort belongs to the task, not the profile.** Effort is the largest single quality-cost trade-off Anthropic measured; lower effort is safe for research-style and short tasks, costly for long-horizon coding. → xend never sets `effortLevel` globally; agents run at `low`/`medium`; the docs describe the cheap-first cascade (run at lower effort, re-run failures at the default) for workloads with a test signal. → Saving: up to half the cost per task on suitable workloads. → Quality: -2 to -8 points if applied blindly, neutral when gated by a checker. → Grade B. → Status: guidance and subagent defaults only.
+
+**H12. Checkpoint, then clear.** `/clear` is free; compaction reads the whole conversation once and cold-starts the cache, and the summary drops details the next turns need. → PreCompact hook writes a checkpoint (edited files, verification commands, recent requests) from the transcript; `/xend:checkpoint` adds decisions and open items; SessionStart on compact or clear re-injects it. → Saving: enables cheap resets between tasks; avoids re-discovery turns after compaction. → Quality: positive on continuity. → Grade C. → Status: shipped.
+
+**H13. One-hour cache TTL for interactive sessions.** A pause longer than five minutes misses the 5-minute cache and re-writes the whole prefix at 1.25x; the 1-hour TTL writes at 2x and pays for itself on the first prevented miss. Subscription plans already use 1 h within included usage. → `promptCacheTtl: "1h"` via `/xend:setup --with-recommended`. → Grade A for the arithmetic, B for the pause-frequency assumption. → Status: opt-in setting.
+
+**H14. Native Bash output cap.** Claude Code's `bashOutputMaxChars` (default 30,000, persisted to a file beyond that) is the right place for the hard cap; xend shapes below it. → 8,000 in `balanced` via setup. → Grade C. → Status: opt-in setting.
+
+**H15. The condensed-output contract prevents the rtk failure mode.** The model must know that a condensed result is complete, where the original is, and that re-running will not show more. *(observed here)*: a marker-only rewrite without explanation made Haiku spend its reply complaining about hooks. → Stable paragraph in the session block plus a self-explanatory marker on every shaped result. → Grade A for the failure, C for the remedy. → Validation: turn deltas in the bench must not rise. → Status: shipped.
+
+**H16. Plugin overhead must be smaller than its savings.** Skill descriptions, agent descriptions and the session block are prefix cost paid once per session and then cached. xend keeps seven short skill descriptions, four agents, and a ~600-token block. *(measured here)*: on a five-turn bugfix task the xend arm used 2.5% more total tokens than baseline (cache writes of the block), and on a reading task 15% fewer. Savings scale with session length and tool-output volume; on very short sessions expect roughly zero. → Grade B. → Validation: bench by category and by turn count.
+
+**H17. Subagents without memory files and at low effort.** `omitClaudeMd: true` and `effort: low` on scout and reader remove the memory prefix and the reasoning budget from cheap, mechanical work. → Grade C. → Status: shipped.
+
+**H18. Statistical gating is the only honest guarantee, and it must cover cost.** A paired design with bootstrap intervals, a sign test and a stated minimum detectable effect; promotion only when three gates pass at once: the one-sided 95% lower bound of the pass-rate delta is above -3 points, the upper bound of the cost change is below zero, and the upper bound of the turn delta is at most +0.25. Tokens and cost come from `modelUsage` and `total_cost_usd` (subagents included), never from the main-loop `usage` field, which excludes subagent work and would flatter delegation. Evidence merges across runs. → `bench/`. → Grade A for the mathematics. → Status: shipped; see section 6 for what the current suite can and cannot detect.
+
+## 4. Rejected or deferred
+
+| Idea | Why not (evidence) |
+|---|---|
+| Summarize tool output with a small model | Masking matched or beat it and was cheaper; summaries hid stopping signals and lengthened trajectories 13-15% (Complexity Trap). xend's transforms never call a model. |
+| Symbol and abbreviation "compression" (`cfg`, `impl`, arrows) | Tokenizers split invented abbreviations into as many tokens as the word; arrows are their own token. Zero saving, real ambiguity (caveman's own finding). |
+| Compress the user's prompt or CLAUDE.md into telegraphic prose | CAVEWOMAN: input compression raises net cost ~1.15x and lowers accuracy. xend never rewrites prompts and audits memory files structurally only. |
+| Rewrite commands before execution (rtk-style) | Independent benchmark: +7.6% cost, +13.8% turns. The model cannot recover what it never received. xend shapes results after execution and keeps the original. |
+| Block large Reads with a PreToolUse deny | Forces an extra turn on every legitimately large read; no rigorous before/after exists. xend's `aggressive` profile turns such reads into honest ranged reads instead. |
+| Replace a large Read result with a synthesized outline | A heuristic outline misses definitions (decorated methods, re-exports, `const f = () =>`) and the model reads a missing symbol as absent; it also makes the Read shape incoherent. Removed after review. |
+| Minify JSON in tool output | Unmeasured token effect (pretty JSON tokenizes cheaply) and a real correctness risk: an `Edit` after `cat file.json` must match the pretty-printed file on disk. Removed from all profiles. |
+| Shorten repeated `Read` results | A Read is the model's working copy; hiding it invites an `Edit` from memory. Dedupe is Bash-only. |
+| Cut the middle of diffs or multi-failure test runs | The middle hunk or the middle failure is exactly what a reviewer or a fixer needs. Head/tail applies to generic output only. |
+| Lower effort or switch to a cheaper model globally | Effort is the quality lever (-2 to -8 points on long-horizon coding); a model switch mid-session invalidates the cache. Per-task decisions only. |
+| Route the main session through a third-party proxy or off-Anthropic backends | Breaks native prompt caching and changes the model; outside the quality bound by construction. |
+| Semantic response caching | Chat-style evidence only; stale-reuse risk on near-duplicate coding requests. |
+| Automatic `/compact` at low thresholds | Compaction is a paid summarization pass plus a cold cache; Anthropic recommends clearing rarely and in large batches. xend prefers checkpoint + `/clear` and, in `aggressive`, infrequent server-side clearing. |
+
+## 5. What xend adds that did not exist as a package
+
+1. Tool-result shaping through the native `updatedToolOutput` hook: in-process, deterministic, lossless-recoverable, no proxy or daemon, with a marker contract designed against the rtk failure mode.
+2. A per-session dedupe registry for byte-identical repeats that resets on compaction.
+3. Server-side context editing switched on inside Claude Code through `CLAUDE_CODE_EXTRA_BODY`, with conservative batch parameters.
+4. A lightweight checkpoint written before compaction and re-injected after compaction or `/clear`, without a database or background worker.
+5. A static audit of prefix composition (memory files, settings, MCP servers, per-turn hooks, cache hit ratio) with ranked, specific fixes.
+6. Honest range limiting for unranged reads of very large files (aggressive), through a PreToolUse `updatedInput`.
+7. A verify-or-escalate delegation contract for cheap-model subagents, shipped as agents plus a routing skill.
+8. A paired benchmark that reports its minimum detectable effect and merges evidence across runs, with a three-part promotion gate (quality, cost, turns) instead of a marketing percentage, and adversarial tasks built to catch the ways a condenser fails.
+
+Ideas from the adversarial review that are not built yet, in order of expected value: an audit line for each MCP server's schema cost; LSP (code-intelligence) plugin suggestions per repository language; mechanical verification of subagent citations in a `SubagentStop` hook (check that each `path:line` exists and contains the claimed symbol); structure-aware retrieval (expand a grep hit to its enclosing function; a token-budgeted repo map); a bench arm against Claude Code's built-in Concise output style; graded scoring and a position-swapped LLM judge for commit messages and docs, which the pass/fail bench cannot see.
+
+## 6. Measuring quality: the 3% question
+
+For a binary pass/fail outcome at a 70% baseline pass rate, detecting a 3-point drop at 80% power and one-sided alpha 0.05 needs roughly:
+
+| Design | Paired task-runs needed |
+|---|---|
+| independent arms (wrong design) | ~3,000 per arm |
+| paired, between-arm correlation 0.8, one trial per task | ~600 |
+| paired, 150 tasks x 5 trials | ~750 total runs |
+| paired, 50 tasks x 5 trials | detects ~5 points, not 3 |
+| paired, 16 tasks x 1 trial (the shipped suite, one run) | detects ~12-20 points |
+
+Token savings are continuous and large, so the same runs measure them tightly. This asymmetry is
+why xend reports a minimum detectable effect next to every pass-rate delta and merges every run
+under `bench/results/`: the bound is reached by accumulation, not by a single run. Graded scoring
+(partial credit per test case) and LLM-judge pairwise comparison with position swapping would raise
+power per run and are the next step for the suite.
+
+## 7. Verified in this environment (Claude Code 2.1.272)
+
+- Hook input and output shapes for Bash, Read, Grep (content and files modes), Glob; the exact fields are in `scripts/post-tool-use.js`.
+- PostToolUse `updatedToolOutput` replaces what the model sees; PreToolUse `updatedInput` rewrites tool input.
+- `CLAUDE_CODE_EXTRA_BODY` with `context_management` produces `applied_edits` in API responses (`cleared_tool_uses` 2 then 3; `cleared_input_tokens` 6,093 then 11,558).
+- Fixed prefix 32,062 tokens per request in this environment; `--strict-mcp-config` did not remove host-provided connectors.
+- Plugin validation passes (`claude plugin validate . --strict`); `claude -p --plugin-dir` loads hooks and shaping runs in a live session.
+- First full run (16 tasks, Claude Sonnet 5, low effort, one trial per arm, pre-review defaults): pass rate 93.8% in both arms; output tokens -9.0%; turns 4.8 to 4.6; cost $0.106 to $0.103 per task; the log-needle task 8 to 4 turns and 455k to 206k tokens; short five-turn tasks +2% for the plugin's prefix. The three-part gate reads INCONCLUSIVE at this size, as it should. Later runs with the revised defaults are under `bench/results/`.
+- A benchmark bug worth recording: the runner passed a relative state directory, so hooks wrote their logs under the fixture copy and the "shaping activity" column read zero for every task. Every number above was still produced by real runs; the log was simply lost. Fixed by resolving the directory to an absolute path.
+
+## 8. Sources
+
+- JetBrains: https://blog.jetbrains.com/ai/2026/07/speak-to-ai-agents-like-cavemen-tosave-tokens/ (caveman; rtk in part 2 of the same series)
+- JetBrains Research, The Complexity Trap: https://arxiv.org/abs/2508.21433 and https://blog.jetbrains.com/research/2025/12/efficient-context-management/
+- Adobe Research, CAVEWOMAN: https://arxiv.org/abs/2606.24083
+- Anthropic context editing: https://platform.claude.com/docs/en/build-with-claude/context-editing ; memory tool: https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool
+- Anthropic prompt caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching ; Claude Code caching: https://code.claude.com/docs/en/prompt-caching
+- Anthropic, effective context engineering: https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents
+- Claude Code costs: https://code.claude.com/docs/en/costs ; context window: https://code.claude.com/docs/en/context-window ; hooks: https://code.claude.com/docs/en/hooks
+- Chroma, Context Rot: https://www.trychroma.com/research/context-rot
+- Lost in the Middle: https://arxiv.org/abs/2307.03172
+- aider repo map: https://aider.chat/2023/10/22/repomap.html
+- FrugalGPT: https://arxiv.org/abs/2305.05176 ; RouteLLM: https://arxiv.org/abs/2406.18665
+- SWE-Pruner: https://www.arxiv.org/pdf/2601.16746
+- OpenHands condensers: https://docs.openhands.dev/sdk/arch/condenser
+- Mini-SWE-Agent token profile: https://towardsdatascience.com/agentic-ai-how-to-save-on-tokens/
+- caveman: https://github.com/JuliusBrussee/caveman ; rtk: https://github.com/rtk-ai/rtk ; context-guard: https://github.com/ictechgy/context-guard ; ccusage: https://github.com/ccusage/ccusage

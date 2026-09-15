@@ -1,0 +1,8 @@
+{
+  "name": "reading-log-needle",
+  "category": "reading",
+  "difficulty": 2,
+  "prompt": "The `orders-api` service is failing in production. Check `logs/app.log` for what's going wrong and fix `config/app.yaml` to match what the log says it should be. Only change the value the log says is wrong; leave the rest of the config alone.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

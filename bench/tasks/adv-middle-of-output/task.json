@@ -1,0 +1,8 @@
+{
+  "name": "adv-middle-of-output",
+  "category": "reading",
+  "difficulty": 2,
+  "prompt": "The build fails; read build/build.log and fix config/env.example accordingly.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

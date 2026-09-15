@@ -1,0 +1,8 @@
+{
+  "name": "navigation-find-constant",
+  "category": "navigation",
+  "difficulty": 2,
+  "prompt": "We want `fetch_with_retries` in `client.py` to attempt up to 5 times instead of 3. There are a few `MAX_RETRIES`-looking constants scattered around this small codebase (`constants_legacy.py`, `config.py`, `client.py`) - find the one that actually controls the retry behavior in `fetch_with_retries` and change it to 5. Leave the other, unrelated `MAX_RETRIES` constants exactly as they are.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

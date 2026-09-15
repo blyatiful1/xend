@@ -1,0 +1,8 @@
+{
+  "name": "reading-big-file-edit",
+  "category": "reading",
+  "difficulty": 3,
+  "prompt": "Users report that a de-duplication helper we call on the recent-activity feed isn't actually removing duplicates - items that appear more than once in the input still appear more than once in the output, even though the order otherwise looks right. That helper lives somewhere in `bigmod.py`. Find it and fix the bug so `test_bigmod.py` passes. Do not modify the test file.",
+  "timeout_s": 600,
+  "max_turns": 40
+}
