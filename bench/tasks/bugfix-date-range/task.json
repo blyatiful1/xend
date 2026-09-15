@@ -1,0 +1,8 @@
+{
+  "name": "bugfix-date-range",
+  "category": "bugfix",
+  "difficulty": 1,
+  "prompt": "The `in_range` function in `daterange.py` is supposed to check whether a date falls within an inclusive `[start, end]` range, but `test_daterange.py` currently fails on the boundary cases. Fix the bug in `daterange.py` so all tests in `test_daterange.py` pass. Do not modify the test file.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

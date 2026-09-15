@@ -1,0 +1,8 @@
+{
+  "name": "qa-retry-config",
+  "category": "qa",
+  "difficulty": 2,
+  "prompt": "Look at `http_client.py` in this project and explain in your final reply how request retries are configured: how many retries happen, what the exponential backoff base is, and - working through the math - what the maximum total time spent sleeping between attempts would be if every attempt fails. Give the specific numbers, don't just describe the logic in words.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

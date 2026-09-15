@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "xend",
+  "description": "Token-efficiency framework for Claude Code.",
+  "owner": { "name": "blyatiful1", "url": "https://github.com/blyatiful1" },
+  "plugins": [
+    {
+      "name": "xend",
+      "description": "Spend fewer tokens in Claude Code without losing quality.",
+      "source": "./",
+      "category": "productivity",
+      "tags": ["tokens", "cost", "context", "efficiency"]
+    }
+  ]
+}

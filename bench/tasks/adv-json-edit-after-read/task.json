@@ -1,0 +1,8 @@
+{
+  "name": "adv-json-edit-after-read",
+  "category": "bugfix",
+  "difficulty": 1,
+  "prompt": "`python3 -m pytest test_app.py` (or `python3 -m unittest test_app`) fails with a TypeError. The problem is a wrong value in `settings.json`. Fix only `settings.json` (don't touch `app.py` or `test_app.py`) so the test passes. Keep the rest of settings.json exactly as it is - don't reformat or reorder it.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

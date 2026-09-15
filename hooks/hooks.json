@@ -1,0 +1,43 @@
+{
+  "description": "xend: lossless tool-output shaping, session context, edit tracking, compaction checkpoints",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "^(startup|clear|compact)$",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js\"", "timeout": 10, "statusMessage": "xend: loading profile" }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^Read$",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-read.js\"", "timeout": 5 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Bash|Read|Grep|Glob|mcp__.+)$",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/post-tool-use.js\"", "timeout": 10 }
+        ]
+      },
+      {
+        "matcher": "^(Edit|Write|MultiEdit|NotebookEdit)$",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/record-edit.js\"", "timeout": 5 }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "^(manual|auto)$",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-compact.js\"", "timeout": 10, "statusMessage": "xend: writing checkpoint" }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "adv-print-debugging",
+  "category": "bugfix",
+  "difficulty": 2,
+  "prompt": "`test_analytics.py` currently fails one test out of many. Find the bug in `analytics.py` and fix it so the full test suite passes. If you add print statements to debug, remove them again before you're done - no `print(` calls should remain in `analytics.py`.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

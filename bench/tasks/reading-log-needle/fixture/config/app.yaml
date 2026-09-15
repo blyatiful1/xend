@@ -1,0 +1,7 @@
+service:
+  name: orders-api
+database:
+  host: db.internal
+  port: 5432
+  timeout_seconds: 5
+  pool_size: 10

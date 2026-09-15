@@ -1,0 +1,8 @@
+{
+  "name": "adv-grep-many-hits",
+  "category": "refactor",
+  "difficulty": 3,
+  "prompt": "The helper `fmt_money(x)` in `moneymod/fmt.py` needs to support multiple currencies. Change its signature to `fmt_money(x, currency=\"USD\")`, and update every single call site across the `moneymod` package (`moneymod/mod_01.py` through `moneymod/mod_12.py`) to pass `currency=cfg.CURRENCY` explicitly, importing `cfg` from `moneymod` in each file that needs it. Do not skip any file. The default (USD) formatted output must stay byte-for-byte identical to what it is today.",
+  "timeout_s": 600,
+  "max_turns": 40
+}

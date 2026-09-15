@@ -1,0 +1,8 @@
+{
+  "name": "feature-lru-cache",
+  "category": "feature",
+  "difficulty": 3,
+  "prompt": "Implement the `LRUCache` class in `lru_cache.py` according to the interface documented in its docstring: `LRUCache(capacity)` creates a cache holding at most `capacity` entries; `.get(key)` returns the stored value and marks that key as most-recently-used, or returns `-1` if the key is absent; `.put(key, value)` inserts or updates a key (marking it most-recently-used) and, if this pushes the cache over capacity, evicts the least-recently-used entry first; `len(cache)` returns the number of entries currently stored. Capacity is always a positive integer.",
+  "timeout_s": 600,
+  "max_turns": 40
+}
