@@ -260,16 +260,18 @@ here)* showed why a purely advisory rule does not work: with the architect parag
 no gate, a Sonnet session given a three-module package did the whole task itself — 10 turns, no
 plan, zero subagents, $0.28. A first gate that refused the third direct edit once and *named* `plan
 off` as the way out was taken as an escape hatch: the model ran `plan off` and finished directly —
-11 turns, one denial, $0.18. The shipped gate therefore has no advertised exit: it denies a direct
-edit once per session when architect mode and the gate are both enabled, no `plan.json` exists yet
-(a plan means the architect is doing a deliberate `self` task or a fix), the call is not from inside
-a subagent, and the file being edited would be the session's fourth distinct direct edit
-(`architect.minFiles: 4`, so three files may still be edited directly before the gate engages). The
-denial reason gives the exact `plan set` JSON shape and the dispatch steps, and never mentions a way
-to turn the gate off; `/xend:plan off` (the CLI's `plan off`) remains the user's actual switch,
-reached through the session block or the skill, not through the denial text. `architect.gateMaxDenials:
-3` bounds the turn tax at three denials per session even if the model keeps retrying instead of
-planning, after which direct edits are allowed.
+11 turns, one denial, $0.18. The shipped gate therefore has no advertised exit: when architect mode
+and the gate are both enabled, no `plan.json` exists yet (a plan means the architect is doing a
+deliberate `self` task or a fix), and the call is not from inside a subagent, it denies a direct
+`Write`/`Edit`/`MultiEdit` of any not-yet-edited file once the session has already edited at least
+`minFiles - 1` (default 3, i.e. `architect.minFiles: 4`) distinct files directly — so three files
+may still be edited directly before the gate engages, and it denies again on the next new file after
+that. Each denial is recorded in `gate.json` (`{ denials, files }`); once `architect.gateMaxDenials`
+(3) denials have accumulated in the session, the gate stops firing and direct edits are allowed
+again, bounding the turn tax at three denied turns even if the model keeps retrying instead of
+planning. The denial reason gives the exact `plan set` JSON shape and the dispatch steps, and never
+mentions a way to turn the gate off; `/xend:plan off` (the CLI's `plan off`) remains the user's
+actual switch, reached through the session block or the skill, not through the denial text.
 
 ### Invariants
 
