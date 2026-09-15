@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { parseArm, parseScore, splitCost } = require('../bench/run.js');
+const { parseArm, parseScore, splitCost, parseArmEnv } = require('../bench/run.js');
 
 test('parseArm: legacy bare label uses the label as kind and the default model, mode plain', () => {
   assert.deepStrictEqual(parseArm('baseline', { model: 'sonnet' }), { label: 'baseline', kind: 'baseline', model: 'sonnet', mode: 'plain' });
@@ -73,4 +73,14 @@ test('splitCost: falls back to the highest-cost model as main when the alias is 
 test('splitCost: empty modelUsage yields zero cost on both sides and no main model', () => {
   assert.deepStrictEqual(splitCost({}, 'sonnet'), { cost_main_usd: 0, cost_sub_usd: 0, main_model: null });
   assert.deepStrictEqual(splitCost(null, 'sonnet'), { cost_main_usd: 0, cost_sub_usd: 0, main_model: null });
+});
+
+test('parseArmEnv: empty or undefined input yields {}', () => {
+  assert.deepStrictEqual(parseArmEnv(''), {});
+  assert.deepStrictEqual(parseArmEnv(undefined), {});
+});
+
+test('parseArmEnv: splits pairs on "," and each pair on its first "=" (a value may itself contain "=")', () => {
+  assert.deepStrictEqual(parseArmEnv('A=1,B=x=y'), { A: '1', B: 'x=y' });
+  assert.deepStrictEqual(parseArmEnv('XEND_ARCHITECT_MIN_FILES=1'), { XEND_ARCHITECT_MIN_FILES: '1' });
 });

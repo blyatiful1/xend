@@ -54,9 +54,58 @@ test('validate: other required fields (id shape, tier, files, goal, top-level ve
 test('validate: a well-formed plan is ok', () => {
   const v = plan.validate({
     goal: 'g', verify: 'npm test',
-    tasks: [task({ id: 'T1', tier: 'lite' }), task({ id: 'T2', deps: ['T1'], files: ['b.js'] })],
+    tasks: [
+      task({ id: 'T1', tier: 'lite', verify: 'node --test tests/test_a.js' }),
+      task({ id: 'T2', deps: ['T1'], files: ['b.js'], verify: 'node --test tests/test_b.js' }),
+    ],
   });
-  assert.deepStrictEqual(v, { ok: true, errors: [] });
+  assert.deepStrictEqual(v, { ok: true, errors: [], warnings: [] });
+});
+
+// --- validate: verify-scoping warnings (docs/SPEC-architect.md section 5 + the bench pilot) ----
+
+test('validate: warns per task whose verify equals the project verify', () => {
+  const v = plan.validate({
+    goal: 'g', verify: 'npm test',
+    tasks: [
+      task({ id: 'T1', verify: 'npm test' }),
+      task({ id: 'T2', files: ['b.js'], verify: 'node --test tests/test_b.js' }),
+    ],
+  });
+  assert.strictEqual(v.ok, true);
+  assert.strictEqual(v.warnings.length, 1);
+  assert.match(v.warnings[0], /^task T1: verify equals the project verify/);
+  assert.match(v.warnings[0], /python3 -c "import pkg\.mod"/);
+});
+
+test('validate: warns once when 2+ tasks all share one identical verify command', () => {
+  const v = plan.validate({
+    goal: 'g', verify: 'npm test -- everything',
+    tasks: [
+      task({ id: 'T1', verify: 'npm test -- mod' }),
+      task({ id: 'T2', files: ['b.js'], verify: 'npm test -- mod' }),
+    ],
+  });
+  assert.strictEqual(v.ok, true);
+  assert.ok(v.warnings.includes('all tasks share one verify command; split them so each can pass in isolation'), v.warnings.join('; '));
+});
+
+test('validate: both warnings fire together when every task copies the project verify', () => {
+  const v = plan.validate({
+    goal: 'g', verify: 'npm test',
+    tasks: [task({ id: 'T1', verify: 'npm test' }), task({ id: 'T2', files: ['b.js'], verify: 'npm test' })],
+  });
+  assert.strictEqual(v.warnings.length, 3); // T1, T2 each get warning (a), plus one warning (b)
+  assert.ok(v.warnings.some((w) => /^task T1: verify equals the project verify/.test(w)));
+  assert.ok(v.warnings.some((w) => /^task T2: verify equals the project verify/.test(w)));
+  assert.ok(v.warnings.includes('all tasks share one verify command; split them so each can pass in isolation'));
+});
+
+test('validate: a single-task plan sharing the project verify only gets warning (a), never (b)', () => {
+  const v = plan.validate({ goal: 'g', verify: 'npm test', tasks: [task({ id: 'T1', verify: 'npm test' })] });
+  assert.deepStrictEqual(v.warnings, [
+    'task T1: verify equals the project verify; each task\'s verify must pass with only that task\'s files present (a module\'s own test file, or python3 -c "import pkg.mod")',
+  ]);
 });
 
 test('normalize: adds runtime fields, defaults tier/deps/testFiles', () => {
@@ -120,7 +169,7 @@ test('brief(): exact first line, scope, and verify line', () => {
   assert.strictEqual(lines[4], 'exact behaviour...');
   assert.strictEqual(lines[5], 'Verify: npm test -- a (must pass; xend re-runs it after you finish)');
   assert.strictEqual(lines[6], 'Conventions: use 2 spaces');
-  assert.strictEqual(lines[7], 'Reply in the fixed format: Result / Changed / Verification / Notes.');
+  assert.strictEqual(lines[7], 'Reply in the fixed format, starting with the line Task: T3, then Result / Changed / Verification / Notes.');
 
   // no testFiles -> "none"; no conventions -> line omitted
   const p2 = plan.normalize({ goal: 'g', verify: 'v', tasks: [task({ id: 'T1' })] });

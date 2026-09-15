@@ -30,23 +30,44 @@ function main() {
 
   let kind = verify.agentKind(input.agent_type);
 
-  // Task id: the agent-launch registry (written at Agent launch, PostToolUse) first -- it
-  // survives --no-session-persistence, where the subagent's own transcript file is never written
-  // to disk; fall back to the transcript's first user message only when that file exists.
-  const launch = verify.lookupLaunch(dir, input.agent_id);
-  let taskId = launch ? launch.taskId : null;
-  if (!taskId && transcriptExists) {
-    taskId = verify.taskIdFromPrompt(verify.firstUserPrompt(agentTranscript));
+  let text = typeof input.last_assistant_message === 'string' && input.last_assistant_message
+    ? input.last_assistant_message
+    : (transcriptExists ? verify.lastAssistantText(agentTranscript) : '');
+
+  // Parsed once: reused both for task id resolution (the reply's own Task: line) and, for worker
+  // kinds, the claimed result and verify command below.
+  const reply = verify.parseWorkerReply(text);
+
+  // Task id, in order: the reply's own "Task: <id>" line first -- when the Agent tool runs in
+  // foreground mode, PostToolUse(Agent) fires only *after* SubagentStop, so the agent-launch
+  // registry entry does not exist yet at verification time and the reply is the only channel
+  // guaranteed to be there. Then the registry (written at Agent launch), retried up to 3 times
+  // with a short pause for a write that is merely slow to land. Then the subagent's own
+  // transcript, when that file exists (it does not under --no-session-persistence).
+  let taskId = null;
+  let lookup = 'miss';
+  if (reply.task) {
+    taskId = reply.task;
+    lookup = 'reply';
+  } else {
+    let launch = input.agent_id ? verify.lookupLaunch(dir, input.agent_id) : null;
+    for (let tries = 0; !launch && tries < 3; tries++) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+      launch = verify.lookupLaunch(dir, input.agent_id);
+    }
+    if (launch && launch.taskId) {
+      taskId = launch.taskId;
+      lookup = 'registry';
+    } else if (transcriptExists) {
+      const fromTranscript = verify.taskIdFromPrompt(verify.firstUserPrompt(agentTranscript));
+      if (fromTranscript) { taskId = fromTranscript; lookup = 'transcript'; }
+    }
   }
 
   if (!kind) {
     if (!taskId) return; // not an xend agent and no [xend task <id>] tag to treat it as a worker
     kind = 'worker';
   }
-
-  let text = typeof input.last_assistant_message === 'string' && input.last_assistant_message
-    ? input.last_assistant_message
-    : (transcriptExists ? verify.lastAssistantText(agentTranscript) : '');
 
   // The plan task's own verify command is the contract and wins over the builder's stated one.
   const planPath = path.join(dir, 'plan.json');
@@ -62,7 +83,6 @@ function main() {
 
   let claimed = null, command = null, exit = null, ms = 0, stdout = '', stderr = '', malformed = false, allowed = false;
   if (isWorkerKind) {
-    const reply = verify.parseWorkerReply(text);
     claimed = reply.result;
     malformed = !reply.result || (reply.command === null && reply.summary === null);
     command = (task && task.verify) ? task.verify : reply.command;
@@ -113,6 +133,7 @@ function main() {
     agent_type: input.agent_type || null,
     kind,
     task: taskId || null,
+    lookup,
     claimed,
     verdict,
     command: command || null,

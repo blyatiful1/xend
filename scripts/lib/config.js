@@ -172,6 +172,10 @@ function envOverrides(env) {
   if (env.XEND_ARCHITECT !== undefined) o.architect = Object.assign({}, o.architect, { enabled: !/^(0|false|off)$/i.test(env.XEND_ARCHITECT) });
   if (env.XEND_ARCHITECT_GATE !== undefined) o.architect = Object.assign({}, o.architect, { gate: !/^(0|false|off)$/i.test(env.XEND_ARCHITECT_GATE) });
   if (env.XEND_VERIFY !== undefined) o.architect = Object.assign({}, o.architect, { verify: !/^(0|false|off)$/i.test(env.XEND_VERIFY) });
+  if (env.XEND_ARCHITECT_MIN_FILES !== undefined) {
+    const n = Number(env.XEND_ARCHITECT_MIN_FILES);
+    if (Number.isInteger(n) && n >= 1) o.architect = Object.assign({}, o.architect, { minFiles: n });
+  }
   return o;
 }
 

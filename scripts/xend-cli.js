@@ -133,6 +133,7 @@ function planCommand(sub, args, cwd) {
       for (const t of p.tasks) {
         console.log(t.id + ' [' + t.tier + '] ' + t.title + ' — files: ' + t.files.join(', ') + ' — deps: ' + (t.deps.length ? t.deps.join(', ') : 'none'));
       }
+      for (const w of v.warnings) console.log('warning: ' + w);
       return;
     }
     case 'status': {

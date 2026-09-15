@@ -127,17 +127,26 @@ function checkCitations(citations, cwd, readerEvidence) {
 
 // --- worker replies ------------------------------------------------------------
 
-// Parses the fixed worker reply format (spec section 6): Result / Changed / Verification / Notes.
-// The Verification line splits on the first " -> " into command and summary.
+// Parses the fixed worker reply format (spec section 6): an optional leading `Task: <id>` line,
+// then Result / Changed / Verification / Notes. The Verification line splits on the first " -> "
+// into command and summary. `task` is null when the line is absent (older replies, or non-plan
+// work); it is only read from lines before Result: so nothing later in the reply is mistaken for
+// it.
 function parseWorkerReply(text) {
   text = String(text || '');
-  let result = null, command = null, summary = null;
+  let result = null, command = null, summary = null, task = null;
   const changed = [];
   let section = null;
+  let sawResult = false;
   for (const line of text.split('\n')) {
+    if (!sawResult) {
+      const taskLine = line.match(/^Task:\s*([\w-]+)/);
+      if (taskLine) task = taskLine[1];
+    }
     const header = line.match(/^(Result|Changed|Verification|Notes):\s*(.*)$/);
     if (header) {
       section = header[1];
+      if (section === 'Result') sawResult = true;
       const rest = header[2];
       if (section === 'Result') {
         const rm = rest.trim().match(/^(PASS|FAIL|BLOCKED)/);
@@ -159,12 +168,15 @@ function parseWorkerReply(text) {
       if (m) changed.push(m[1].trim());
     }
   }
-  return { result, command, summary, changed };
+  return { result, command, summary, changed, task };
 }
 
 // --- command safety and execution -----------------------------------------------
 
 const ALLOWLIST_RE = /^(python3?\s+-m\s+(pytest|unittest)|pytest|npm\s+(run\s+)?test|pnpm\s+(run\s+)?test|yarn\s+(run\s+)?test|node\s+--test|go\s+test|cargo\s+(test|check)|make\s+(test|check)|bash\s+[\w./-]*test[\w./-]*\.sh|\.\/[\w./-]*test[\w./-]*\.sh|ruff|eslint|tsc|mypy|node\s+[\w./-]+\.test\.js)\b/;
+// An import smoke check: `python3 -c "import a.b"` or `python -c 'import a.b, c.d'`, one or more
+// dotted module names, one quote style used consistently, nothing else in the string.
+const IMPORT_SMOKE_RE = /^python3?\s+-c\s+(["'])import\s+[\w.]+(?:\s*,\s*[\w.]+)*\1$/;
 // The allowlist's own "|" characters above are regex alternation, not shell pipes; a command
 // still needs no shell metacharacters at all to run.
 const FORBIDDEN_RE = /[;&|<>`]|\$\(/;
@@ -174,7 +186,7 @@ function commandAllowed(cmd) {
   const trimmed = cmd.trim();
   if (!trimmed) return false;
   if (FORBIDDEN_RE.test(trimmed)) return false;
-  return ALLOWLIST_RE.test(trimmed);
+  return ALLOWLIST_RE.test(trimmed) || IMPORT_SMOKE_RE.test(trimmed);
 }
 
 function capBuffer(buf, max) {

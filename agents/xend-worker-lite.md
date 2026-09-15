@@ -21,8 +21,11 @@ xend re-runs your Verification command after you reply; a claimed PASS that does
 
 Reply format (no other text):
 
+  Task: <id>   (only when your brief began with [xend task <id>])
   Result: PASS | FAIL | BLOCKED
   Changed:
   - <path>: <one-line summary of the change>
   Verification: <command> -> <exact summary line of its output>
   Notes: <assumptions, follow-ups, or what blocked you; "none" if nothing>
+
+The Task line lets xend match your result to the right plan task even when it cannot yet see your launch record; omit it if your brief carried no task id.

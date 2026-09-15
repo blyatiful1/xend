@@ -47,11 +47,14 @@ function findCycle(tasks) {
   return cyclePath;
 }
 
-// Returns { ok, errors[] }. One message per problem; never throws on malformed input.
+// Returns { ok, errors[], warnings[] }. One message per problem; never throws on malformed input.
+// Warnings are non-fatal (ok can still be true) and flag plans where a task's verify command
+// cannot pass with only that task's files present, which is the bench pilot's root cause for
+// builders replying BLOCKED: the planning model gave every task the whole project verify.
 function validate(input) {
   const errors = [];
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    return { ok: false, errors: ['plan must be a JSON object'] };
+    return { ok: false, errors: ['plan must be a JSON object'], warnings: [] };
   }
   if (!isNonEmptyString(input.goal)) errors.push('goal must be a non-empty string');
   if (!isNonEmptyString(input.verify)) errors.push('verify must be a non-empty string');
@@ -60,7 +63,7 @@ function validate(input) {
   }
   if (!Array.isArray(input.tasks)) {
     errors.push('tasks must be an array');
-    return { ok: false, errors };
+    return { ok: false, errors, warnings: [] };
   }
   const ids = new Set();
   for (const t of input.tasks) if (t && typeof t.id === 'string') ids.add(t.id);
@@ -95,7 +98,24 @@ function validate(input) {
   });
   const cycle = findCycle(input.tasks);
   if (cycle) errors.push('dependency cycle: ' + cycle.join(' -> '));
-  return { ok: errors.length === 0, errors };
+
+  const warnings = [];
+  if (isNonEmptyString(input.verify)) {
+    for (const t of input.tasks) {
+      if (t && isNonEmptyString(t.id) && isNonEmptyString(t.verify) && t.verify === input.verify) {
+        warnings.push('task ' + t.id + ': verify equals the project verify; each task\'s verify must pass ' +
+          'with only that task\'s files present (a module\'s own test file, or python3 -c "import pkg.mod")');
+      }
+    }
+  }
+  if (input.tasks.length >= 2) {
+    const verifies = input.tasks.filter((t) => t && isNonEmptyString(t.verify)).map((t) => t.verify);
+    if (verifies.length === input.tasks.length && new Set(verifies).size === 1) {
+      warnings.push('all tasks share one verify command; split them so each can pass in isolation');
+    }
+  }
+
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 // --- runtime shape -------------------------------------------------------------
@@ -165,7 +185,7 @@ function brief(plan, task) {
   lines.push(task.spec);
   lines.push('Verify: ' + task.verify + ' (must pass; xend re-runs it after you finish)');
   if (plan.conventions) lines.push('Conventions: ' + plan.conventions);
-  lines.push('Reply in the fixed format: Result / Changed / Verification / Notes.');
+  lines.push('Reply in the fixed format, starting with the line Task: ' + task.id + ', then Result / Changed / Verification / Notes.');
   return lines.join('\n');
 }
 

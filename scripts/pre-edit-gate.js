@@ -75,6 +75,8 @@ function main() {
     'Step 2: node "' + cliPath + '" plan next prints one brief per ready task; dispatch each brief with one Agent call ' +
     '(subagent_type xend-worker-lite for lite, xend-worker for worker; prompt = the brief), independent tasks in the same message. ' +
     'Step 3: repeat plan next until it reports the plan complete, then run the project verify command. ' +
+    'Give every task a verify command that can pass with only that task\'s files present (its own test file, ' +
+    'or python3 -c "import pkg.mod"); the project verify runs once at the end. ' +
     'Files you already wrote stay as they are.';
   io.writeHookOutput({
     hookSpecificOutput: {

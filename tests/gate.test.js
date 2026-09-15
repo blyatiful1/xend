@@ -87,6 +87,8 @@ test('(b) three prior distinct files + a new fourth: deny JSON, reason names the
   assert.ok(reason.includes('4th file'), reason);
   assert.ok(reason.includes('plan set'), reason);
   assert.ok(reason.includes('plan next'), reason);
+  assert.ok(reason.includes('verify command that can pass with only that task\'s files present'), reason);
+  assert.ok(reason.includes('python3 -c "import pkg.mod"'), reason);
   assert.ok(!reason.includes('plan off'), reason);
   assert.ok(!/disable/i.test(reason), reason);
 

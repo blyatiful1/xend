@@ -219,6 +219,37 @@ test('parseWorkerReply: no Verification line at all yields command and summary n
   assert.equal(r.summary, null);
 });
 
+test('parseWorkerReply: a leading "Task: <id>" line is captured', () => {
+  const text = [
+    'Task: T7',
+    'Result: PASS',
+    'Changed:',
+    '- src/a.py: fixed it',
+    'Verification: npm test -> ok',
+    'Notes: none',
+  ].join('\n');
+  const r = verify.parseWorkerReply(text);
+  assert.equal(r.task, 'T7');
+  assert.equal(r.result, 'PASS');
+});
+
+test('parseWorkerReply: no Task line yields task: null', () => {
+  const text = ['Result: PASS', 'Changed:', '- a.py: x', 'Verification: npm test -> ok', 'Notes: none'].join('\n');
+  assert.equal(verify.parseWorkerReply(text).task, null);
+});
+
+test('parseWorkerReply: a Task: line appearing after Result: is not read as the task id', () => {
+  const text = [
+    'Result: PASS',
+    'Task: T9',
+    'Changed:',
+    '- a.py: x',
+    'Verification: npm test -> ok',
+    'Notes: none',
+  ].join('\n');
+  assert.equal(verify.parseWorkerReply(text).task, null);
+});
+
 // ============================================================================
 // commandAllowed
 // ============================================================================
@@ -268,6 +299,28 @@ test('commandAllowed: rejects commands with shell metacharacters or off-allowlis
 test('commandAllowed: the allowlist\'s own "|" is regex alternation only, not a shell pipe exemption', () => {
   // A command that only matches because of alternation but also pipes output must still be rejected.
   assert.equal(verify.commandAllowed('pytest | tail -n 5'), false);
+});
+
+test('commandAllowed: accepts a python import smoke check, double or single quotes, one or more dotted modules', () => {
+  for (const cmd of [
+    'python3 -c "import a.b"',
+    'python -c \'import a.b, c.d\'',
+    'python3 -c "import os"',
+    'python3 -c "import pkg.mod, other.thing, a.b.c"',
+  ]) {
+    assert.equal(verify.commandAllowed(cmd), true, cmd);
+  }
+});
+
+test('commandAllowed: rejects an import smoke check that does anything beyond the import, or is not an import at all', () => {
+  for (const cmd of [
+    'python3 -c "import os; os.system(\'x\')"',
+    'python3 -c "print(1)"',
+    'python3 -c "import os" && echo done',
+    'python3 -c "import os && import sys"',
+  ]) {
+    assert.equal(verify.commandAllowed(cmd), false, cmd);
+  }
 });
 
 // ============================================================================
@@ -599,6 +652,17 @@ function passReplyText(command) {
   ].join('\n');
 }
 
+function passReplyTextWithTask(taskId, command) {
+  return [
+    'Task: ' + taskId,
+    'Result: PASS',
+    'Changed:',
+    '- src/thing.py: fixed bug',
+    'Verification: ' + command + ' -> ok',
+    'Notes: none',
+  ].join('\n');
+}
+
 test('e2e (a): claimed PASS with a passing verify command -> no stdout, verify.jsonl verdict pass, plan task done+verified', () => {
   const { cwd, stateBase } = setupProject();
   try {
@@ -626,6 +690,9 @@ test('e2e (a): claimed PASS with a passing verify command -> no stdout, verify.j
     assert.equal(rec.verdict, 'pass');
     assert.equal(rec.command, 'node --test tests/pass.test.js');
     assert.equal(rec.blocked, false);
+    // no agents.json entry for agent-a and the reply carries no Task: line, so the registry
+    // lookup retries and misses, and the task id comes from the transcript's first user message.
+    assert.equal(rec.lookup, 'transcript');
 
     const plan = JSON.parse(fs.readFileSync(path.join(dir, 'plan.json'), 'utf8'));
     assert.equal(plan.tasks[0].status, 'done');
@@ -708,6 +775,7 @@ test('e2e (d): a command containing ";" is never executed', () => {
     assert.equal(rec.verdict, 'unverifiable');
     assert.equal(rec.claimed, 'PASS');
     assert.equal(rec.blocked, false); // unverifiable is never blocked
+    assert.equal(rec.lookup, 'transcript');
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(stateBase, { recursive: true, force: true });
@@ -762,6 +830,48 @@ test('e2e: scripts/agent-launch.js records the task id at Agent launch, then sub
     assert.equal(rec.task, 'T9');
     assert.equal(rec.verdict, 'pass');
     assert.equal(rec.scope, null);
+    assert.equal(rec.lookup, 'registry'); // agent-launch.js already wrote it; no retry needed
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(stateBase, { recursive: true, force: true });
+  }
+});
+
+test('e2e: the reply\'s own "Task: <id>" line resolves the task with no agents.json entry and no transcript at all (foreground Agent: PostToolUse(Agent) fires only after SubagentStop)', () => {
+  const { cwd, stateBase } = setupProject();
+  try {
+    const sessionId = 'sess-reply';
+    const dir = stateDirFor(stateBase, sessionId);
+    writeSessionSetup(dir, [
+      { id: 'T1', title: 't', tier: 'worker', files: ['src/thing.py'], testFiles: [], deps: [],
+        spec: 's', verify: 'node --test tests/pass.test.js', status: 'todo', attempts: 0, verified: false, lastVerdict: '', scopeWarnings: [] },
+    ]);
+    assert.equal(fs.existsSync(path.join(dir, 'agents.json')), false);
+    const missingTranscript = path.join(dir, 'this-file-does-not-exist.jsonl');
+
+    const input = {
+      session_id: sessionId, cwd, agent_id: 'agent-reply-1', agent_type: 'xend:xend-worker',
+      agent_transcript_path: missingTranscript,
+      last_assistant_message: passReplyTextWithTask('T1', 'echo unused'), // the plan task's own verify command wins
+      stop_hook_active: false,
+    };
+    const started = Date.now();
+    const res = runHook(SUBAGENT_STOP, input, { XEND_STATE_DIR: stateBase });
+    const elapsedMs = Date.now() - started;
+    assert.equal(res.status, 0);
+    assert.equal((res.stdout || '').trim(), '');
+    // the reply's Task: line is checked first, so no registry-miss retries (3x200ms) happen
+    assert.ok(elapsedMs < 500, 'expected no retry delay, took ' + elapsedMs + 'ms');
+
+    const plan = JSON.parse(fs.readFileSync(path.join(dir, 'plan.json'), 'utf8'));
+    assert.equal(plan.tasks[0].status, 'done');
+    assert.equal(plan.tasks[0].verified, true);
+
+    const verifyLog = fs.readFileSync(path.join(dir, 'verify.jsonl'), 'utf8').trim().split('\n');
+    const rec = JSON.parse(verifyLog[verifyLog.length - 1]);
+    assert.equal(rec.task, 'T1');
+    assert.equal(rec.verdict, 'pass');
+    assert.equal(rec.lookup, 'reply');
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(stateBase, { recursive: true, force: true });

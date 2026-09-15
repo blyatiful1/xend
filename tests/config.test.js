@@ -22,6 +22,21 @@ test('profile defaults and env overrides', () => {
   assert.strictEqual(off.shape.enabled, false);
 });
 
+test('XEND_ARCHITECT_MIN_FILES overrides architect.minFiles; invalid values are ignored', () => {
+  const one = config.resolve({ env: { XEND_ARCHITECT_MIN_FILES: '1' }, cwd: os.tmpdir() });
+  assert.strictEqual(one.architect.minFiles, 1);
+  const five = config.resolve({ env: { XEND_ARCHITECT_MIN_FILES: '5' }, cwd: os.tmpdir() });
+  assert.strictEqual(five.architect.minFiles, 5);
+  // rest of the architect shape survives the override
+  assert.strictEqual(five.architect.enabled, true);
+
+  const base = config.resolve({ env: {}, cwd: os.tmpdir() }).architect.minFiles; // balanced default: 4
+  for (const bad of ['0', '-1', '3.5', 'abc', '']) {
+    const cfg = config.resolve({ env: { XEND_ARCHITECT_MIN_FILES: bad }, cwd: os.tmpdir() });
+    assert.strictEqual(cfg.architect.minFiles, base, 'bad value: ' + JSON.stringify(bad));
+  }
+});
+
 test('project .xend.json overrides profile defaults and can switch profile', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-cfg-'));
   const sub = path.join(dir, 'a', 'b');

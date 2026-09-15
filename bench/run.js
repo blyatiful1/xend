@@ -6,7 +6,7 @@
 //                     [--tasks a,b|glob] [--category bugfix] [--concurrency 2] [--max-budget-usd 2]
 //                     [--tools Bash,Read,Edit,Write,MultiEdit,Grep,Glob]
 //                     [--profile balanced] [--ponytail off|lite|full|ultra] [--ponytail-text adapted|upstream]
-//                     [--ponytail-strict] [--out bench/results/<ts>] [--keep] [--dry-run] [--list]
+//                     [--ponytail-strict] [--arm-env "K=V,K2=V2"] [--out bench/results/<ts>] [--keep] [--dry-run] [--list]
 // Each run is a `claude -p` child. Results append to <out>/runs.jsonl; raw JSON per run in <out>/raw/.
 //
 // --arms accepts either the legacy bare label (`baseline`, `xend` — kind = label, model = --model,
@@ -25,7 +25,7 @@ const TASKS_DIR = path.join(__dirname, 'tasks');
 const TOOLS = 'Bash,Read,Edit,Write,MultiEdit,Grep,Glob';
 
 function parseArgs(argv) {
-  const o = { arms: ['baseline', 'xend'], runs: 1, model: 'sonnet', effort: 'low', tasks: '*', category: '', concurrency: 2, maxBudget: 2, tools: '', profile: 'balanced', ponytail: '', ponytailText: '', ponytailStrict: false, out: '', keep: false, dryRun: false, list: false, extra: [] };
+  const o = { arms: ['baseline', 'xend'], runs: 1, model: 'sonnet', effort: 'low', tasks: '*', category: '', concurrency: 2, maxBudget: 2, tools: '', profile: 'balanced', ponytail: '', ponytailText: '', ponytailStrict: false, armEnv: '', out: '', keep: false, dryRun: false, list: false, extra: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i], v = argv[i + 1];
     if (a === '--arms') { o.arms = v.split(','); i++; }
@@ -41,6 +41,7 @@ function parseArgs(argv) {
     else if (a === '--ponytail') { o.ponytail = v; i++; }
     else if (a === '--ponytail-text') { o.ponytailText = v; i++; }
     else if (a === '--ponytail-strict') o.ponytailStrict = true;
+    else if (a === '--arm-env') { o.armEnv = v; i++; }
     else if (a === '--out') { o.out = v; i++; }
     else if (a === '--keep') o.keep = true;
     else if (a === '--dry-run') o.dryRun = true;
@@ -65,6 +66,23 @@ function parseArm(str, defaults) {
   const model = parts[2] || defaults.model;
   const mode = kind === 'xend' && parts[3] === 'architect' ? 'architect' : 'plain';
   return { label, kind, model, mode };
+}
+
+// Pure: parse a "K=V,K2=V2" string into a plain object -- extra env vars applied to every
+// xend-kind arm (not baseline, which gets no --plugin-dir and so no XEND_* vars at all). Pairs
+// split on ",", each pair on its first "=" so a value may itself contain "=". Empty/undefined -> {}.
+function parseArmEnv(str) {
+  const out = {};
+  if (!str) return out;
+  for (const pair of String(str).split(',')) {
+    if (!pair) continue;
+    const idx = pair.indexOf('=');
+    if (idx === -1) continue;
+    const k = pair.slice(0, idx).trim();
+    if (!k) continue;
+    out[k] = pair.slice(idx + 1);
+  }
+  return out;
 }
 
 function globToRe(g) { return new RegExp('^' + g.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$'); }
@@ -119,6 +137,7 @@ function runClaude(task, arm, opts, work, stateDir) {
     if (opts.ponytailText) extraEnv.XEND_PONYTAIL_TEXT = opts.ponytailText;
     if (opts.ponytailStrict) extraEnv.XEND_PONYTAIL_STRICT = '1';
     extraEnv.XEND_ARCHITECT = arm.mode === 'architect' ? '1' : '0';
+    Object.assign(extraEnv, opts.arm_env);
   }
   return new Promise((resolve) => {
     const started = Date.now();
@@ -252,6 +271,7 @@ async function runJob(job, opts, outDir, workRoot) {
     ponytail: arm.kind === 'xend' ? (opts.ponytail || null) : null,
     ponytail_text: arm.kind === 'xend' && opts.ponytail !== 'off' ? (opts.ponytailText || null) : null,
     ponytail_strict: arm.kind === 'xend' ? !!opts.ponytailStrict : false,
+    arm_env: opts.arm_env || {},
     answer_chars: (j.result || '').length,
     ts: new Date().toISOString(),
   };
@@ -272,6 +292,7 @@ async function pool(jobs, n, fn) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+  opts.arm_env = parseArmEnv(opts.armEnv); // parsed once; applied to every xend-kind arm
   const tasks = loadTasks(opts.tasks, opts.category);
   if (opts.list) {
     for (const t of tasks) {
@@ -292,7 +313,11 @@ async function main() {
   for (let trial = 1; trial <= opts.runs; trial++) for (const task of tasks) for (const arm of armSpecs) jobs.push({ task, arm, trial });
   fs.writeFileSync(path.join(outDir, 'config.json'), JSON.stringify({ opts, arms: armSpecs, tasks: tasks.map((t) => t.name), claude_version: claudeVersion(), started: new Date().toISOString() }, null, 2));
   console.log('xend bench: ' + tasks.length + ' tasks x ' + armSpecs.length + ' arms (' + armSpecs.map((a) => a.label).join(', ') + ') x ' + opts.runs + ' runs = ' + jobs.length + ' jobs; effort=' + opts.effort + ' -> ' + outDir);
-  if (opts.dryRun) { for (const j of jobs) console.log('  ' + j.task.name + ' ' + j.arm.label + ' (' + j.arm.kind + ':' + j.arm.model + (j.arm.kind === 'xend' ? ':' + j.arm.mode : '') + ') #' + j.trial); return; }
+  if (opts.dryRun) {
+    for (const j of jobs) console.log('  ' + j.task.name + ' ' + j.arm.label + ' (' + j.arm.kind + ':' + j.arm.model + (j.arm.kind === 'xend' ? ':' + j.arm.mode : '') + ') #' + j.trial);
+    if (Object.keys(opts.arm_env).length) console.log('arm-env (applied to xend-kind arms): ' + JSON.stringify(opts.arm_env));
+    return;
+  }
   let done = 0;
   await pool(jobs, opts.concurrency, async (job) => {
     const rec = await runJob(job, opts, outDir, workRoot);
@@ -313,4 +338,4 @@ async function main() {
 function claudeVersion() { try { return execFileSync('claude', ['--version'], { timeout: 10000 }).toString().trim(); } catch (_) { return 'unknown'; } }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, parseScore, splitCost };
+module.exports = { loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, parseScore, splitCost, parseArmEnv };
