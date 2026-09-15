@@ -40,7 +40,8 @@ Then, in a new session:
 | Say less | caveman-compatible terse style (`lite`, `full`, `ultra`) with hard exemptions: code, errors, numbers, security warnings, and anything persisted outside chat stay exact | session block, `/xend:terse` |
 | Build less | ponytail's lazy-senior-dev ladder (YAGNI, reuse what is here, stdlib, native feature, one line) injected at SessionStart; xend defers to the upstream ponytail plugin when one is installed | session block, `/xend:ponytail` |
 | Read less | deterministic, recoverable shaping of tool results: escape codes, progress bars, repeated lines, passing-test rows and install chatter removed; very long generic output cut to head and tail with the original saved and named; byte-identical command re-runs shortened; grep/glob lists capped with truthful totals | PostToolUse hook (`updatedToolOutput`) |
-| Delegate | `xend-scout` (Haiku, citations only), `xend-reader` (Haiku, condense one artifact), `xend-worker` (Sonnet), `xend-reviewer` (Sonnet), and a routing rule: accept a cheaper model's output only after verifying it | `agents/`, `/xend:route` |
+| Delegate | `xend-scout` (Haiku, citations only), `xend-reader` (Haiku, condense one artifact), `xend-worker` (Sonnet), `xend-worker-lite` (Haiku, one mechanical fully-specified change), `xend-reviewer` (Sonnet), and a routing rule: accept a cheaper model's output only after verifying it | `agents/`, `/xend:route` |
+| Plan, then build cheaply | the main model writes a plan through a small CLI; Haiku/Sonnet builders implement each task in disposable contexts; a deterministic SubagentStop hook re-runs every builder's verify command and sends false claims back for restatement; a PreToolUse gate refuses direct edits above the file floor until a plan exists | `/xend:plan`, session block, `scripts/subagent-stop.js`, `scripts/pre-edit-gate.js` |
 | Reset cheaply | a checkpoint (edited files, verification commands, decisions) written before compaction and re-injected after `/compact` or `/clear`, so `/clear` becomes the default way to end a task | PreCompact hook, `/xend:checkpoint` |
 | Native levers | prompt-cache TTL, Bash output cap, MCP output cap, a `# Compact instructions` section, and (aggressive) Anthropic's server-side clearing of old tool results | `/xend:setup` |
 
@@ -50,9 +51,9 @@ What xend never does: rewrite your prompts, rewrite memory files into telegraphi
 
 | Profile | Adds | Use when |
 |---|---|---|
-| `lite` | terse `lite`, noise-only output cleanup, repeat shortening, audits, plus lean `lite` (xend's adapted ruleset) | you want a conservative start and your own numbers first |
-| `balanced` (default) | terse `full`, structured shaping (tests, installs, long generic output), delegation, checkpoints, plus lean `full` (xend's adapted ruleset) | everyday work |
-| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental), plus lean `full` (adapted text; set `XEND_PONYTAIL_TEXT=upstream` for the upstream-verbatim ruleset JetBrains measured, ~1,400 tokens more per session) | long sessions; validate with the bench first |
+| `lite` | terse `lite`, noise-only output cleanup, repeat shortening, audits, plus lean `lite` (xend's adapted ruleset); architect mode off | you want a conservative start and your own numbers first |
+| `balanced` (default) | terse `full`, structured shaping (tests, installs, long generic output), delegation, checkpoints, plus lean `full` (xend's adapted ruleset); architect mode on | everyday work |
+| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental), plus lean `full` (adapted text; set `XEND_PONYTAIL_TEXT=upstream` for the upstream-verbatim ruleset JetBrains measured, ~1,400 tokens more per session); architect mode on | long sessions; validate with the bench first |
 
 Switch with `/xend:profile <name>` or a `.xend.json` in the repo. Every transform has a kill switch (`XEND_SHAPE_TESTRUNNERS=0`, `XEND_TERSE=off`, ...). Details: `docs/PROFILES.md`.
 
@@ -83,6 +84,16 @@ Read r2 carefully, because it is the kind of number this project exists to surfa
 
 The practical guidance that follows from the data: install xend for sessions that read a lot or run long, use `/xend:doctor` and `/xend:setup` for the native levers, and do not expect savings on five-turn micro-tasks. A 21-task suite cannot certify a 3-point quality bound (it detects roughly an 8-point drop); the bench reports its minimum detectable effect and merges evidence across runs. See `bench/README.md`.
 
+### Architect mode on long tasks
+
+Architect mode (`docs/ARCHITECTURE.md` L7) is a different bet from the layers above: instead of shrinking what the main model reads, it keeps file bodies out of the main model's context entirely by having it plan and delegating the reading and editing to disposable Haiku/Sonnet subagents, verified by a deterministic hook rather than trusted. Two headless smoke tests *(verified here)* shaped the design: given a three-module package to implement, a Sonnet session with the architect paragraph in its context but no gate did the whole task itself — 10 turns, $0.28, zero subagents. A first, soft gate that named `plan off` as its way out was taken exactly that way: the model ran `plan off` and finished directly — 11 turns, one denial, $0.18. A behavioural rule with a strong prior against it ("just do the work") needed a mechanical floor with no advertised exit, which is why the shipped gate (`scripts/pre-edit-gate.js`) never mentions a way to disable itself.
+
+Whether the extra machinery pays for itself is a question for the project bench (`bench/tasks/project-*`, `--arms ...:xend:...:architect`), which has not been run yet:
+
+<!-- R6 -->
+
+On tasks below the size floor (fewer than 3 files, fewer than 8 tool calls) the layer is off by construction: the model works directly, exactly as without it.
+
 ## Quality guarantees
 
 Every mechanism follows the same rules, and the benchmark exists to catch violations:
@@ -93,6 +104,7 @@ Every mechanism follows the same rules, and the benchmark exists to catch violat
 4. `Read` results are never altered. Grep and Glob caps keep the true counts.
 5. Nothing shapes inside subagents.
 6. Promotion of a profile requires the bench to pass three gates at once: pass-rate delta not worse than -3 points, cost confidently lower, turns not higher.
+7. A subagent's claim is never trusted unverified: when its `Verification: <command> -> ...` line matches the allowlist, xend re-runs the command itself; every citation it makes is checked against the real files; a mismatch or a bad citation is sent back to the subagent for restatement; a command outside the allowlist is recorded as unverifiable, never run and never trusted as a PASS.
 
 ## Benchmark
 
@@ -102,7 +114,12 @@ node bench/run.js --runs 3 --model sonnet --effort low  # paired baseline vs xen
 node bench/analyze.js                                   # merged report with CIs, sign test, MDE, verdict
 ```
 
-21 tasks: bugfix, feature, refactor, reading-heavy, navigation, Q&A, plus five adversarial tasks designed to catch condensers that hide the middle of an output, a diff hunk, a debug print, grep hits past a cap, or that minify a file the model must edit.
+21 tasks: bugfix, feature, refactor, reading-heavy, navigation, Q&A, plus five adversarial tasks designed to catch condensers that hide the middle of an output, a diff hunk, a debug print, grep hits past a cap, or that minify a file the model must edit. Two more, `project-*`, are bigger multi-file tasks with hidden tests and partial credit (`test.sh` prints `SCORE: p/t` instead of a flat pass/fail) — where "one model does everything" is compared against architect mode with a multi-arm run, e.g.:
+
+```bash
+node bench/run.js --arms "solo-sonnet:baseline:sonnet,arch-sonnet:xend:sonnet:architect" \
+  --tasks project-* --tools "Bash,Read,Edit,Write,MultiEdit,Grep,Glob,Agent" --max-budget-usd 5 -j 2
+```
 
 Two native eval cases for `claude plugin eval` live in `evals/` (LLM-graded): commit messages must stay in normal prose under the terse style, and a condensed tool result must be trusted rather than re-run. `claude plugin eval .` needs Claude Code's sandbox backend (bubblewrap and socat on Linux) because the cases grant Bash; it could not run in the container this was developed in, so these two cases are unvalidated.
 

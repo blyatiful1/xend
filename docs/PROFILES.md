@@ -5,8 +5,8 @@ xend resolves its configuration in this order (later wins):
 1. profile defaults (`lite`, `balanced`, `aggressive`), see `scripts/lib/config.js`
 2. `~/.config/xend/config.json` (user; `$XDG_CONFIG_HOME/xend/config.json` when set)
 3. the nearest `.xend.json` walking up from the working directory (project)
-4. environment variables: `XEND_PROFILE`, `XEND_TERSE`, `XEND_SHAPE=0`, `XEND_SHAPE_MAX_CHARS`, `XEND_DEDUPE=0`, `XEND_DELEGATION=0`, `XEND_CHECKPOINT=0`, `XEND_READING=0`, and per-transform kill switches `XEND_SHAPE_TESTRUNNERS=0`, `XEND_SHAPE_PKG=0`, `XEND_SHAPE_HEADTAIL=0`, `XEND_SHAPE_ANSI=0`, `XEND_SHAPE_MCP=0`, plus the lean-rules switches `XEND_PONYTAIL=off|lite|full|ultra`, `XEND_PONYTAIL_TEXT=adapted|upstream`, `XEND_UPSTREAM_PONYTAIL=auto|yield|ignore`, `XEND_PONYTAIL_STRICT=1`
-5. session overrides set by skills (`/xend:terse off`, `/xend:ponytail ultra` and friends), stored in the session state directory
+4. environment variables: `XEND_PROFILE`, `XEND_TERSE`, `XEND_SHAPE=0`, `XEND_SHAPE_MAX_CHARS`, `XEND_DEDUPE=0`, `XEND_DELEGATION=0`, `XEND_CHECKPOINT=0`, `XEND_READING=0`, and per-transform kill switches `XEND_SHAPE_TESTRUNNERS=0`, `XEND_SHAPE_PKG=0`, `XEND_SHAPE_HEADTAIL=0`, `XEND_SHAPE_ANSI=0`, `XEND_SHAPE_MCP=0`, plus the lean-rules switches `XEND_PONYTAIL=off|lite|full|ultra`, `XEND_PONYTAIL_TEXT=adapted|upstream`, `XEND_UPSTREAM_PONYTAIL=auto|yield|ignore`, `XEND_PONYTAIL_STRICT=1`, and the architect switches `XEND_ARCHITECT=0|1` (overrides `architect.enabled`), `XEND_VERIFY=0` (disables the `SubagentStop` verifier), `XEND_ARCHITECT_GATE=0` (disables the `PreToolUse` gate)
+5. session overrides set by skills (`/xend:terse off`, `/xend:ponytail ultra`, `/xend:plan off|on` and friends), stored in the session state directory
 
 Any layer may set `"profile"` and override individual keys. Example `.xend.json` for a repo whose test output is the signal you want to keep in full:
 
@@ -35,6 +35,12 @@ Any layer may set `"profile"` and override individual keys. Example `.xend.json`
 | `delegation` (subagents advertised in the session block) | on | on | on |
 | `checkpoint` (PreCompact checkpoint, re-injected on compact/clear) | on | on | on |
 | `contextEditing` (server-side clearing of old tool results via `CLAUDE_CODE_EXTRA_BODY`) | off | off | on: trigger 110k input tokens, keep 12 tool uses, clear at least 40k |
+| `architect.enabled` (plan-then-build: the main model plans, cheap subagents build in disposable contexts; `docs/ARCHITECTURE.md` L7) | false | true | true |
+| `architect.minFiles` / `architect.minToolCalls` (guidance floor named in the session block; `minFiles` also sets the gate's file threshold) | 4 / 8 | 4 / 8 | 4 / 8 |
+| `architect.verify` (`SubagentStop` re-runs each builder's own verify command instead of trusting its claim) | true | true | true |
+| `architect.verifyTimeoutMs` | 120000 | 120000 | 120000 |
+| `architect.blockOnMismatch` (a mismatched or malformed reply is blocked once so the builder restates truthfully) | true | true | true |
+| `architect.gate` / `architect.gateMaxDenials` (`PreToolUse` denies a direct edit once a plan is above the file floor and no plan exists yet; bounded to this many denials per session) | true / 3 | true / 3 | true / 3 |
 
 ## Session state
 
@@ -49,8 +55,14 @@ Per-session files live in the first of: `$XEND_STATE_DIR/<session-id>`, `<scratc
 | `shaping.jsonl` | one record per shaped result (chars before/after, transform kinds) and one per recovery (the model read a persisted original) |
 | `checkpoint.md` | written by the PreCompact hook and by `/xend:checkpoint`; re-injected after compact/clear |
 | `session.json` | overrides set by skills for this session |
+| `plan.json` | the architect plan: goal, project verify command, tasks with their runtime status, attempts, verified flag, scope warnings (`docs/ARCHITECTURE.md` L7) |
+| `agents.json` | launch registry written by `scripts/agent-launch.js` at `PostToolUse(Agent)`: `agentId -> { taskId, subagentType, prompt, toolUseId }`, capped at 200 entries; lets `SubagentStop` recover a task id even when the subagent's own transcript was never written to disk |
+| `verify.jsonl` | one record per `SubagentStop` verification: agent, kind, task, claimed result, verdict, command, exit code, duration, whether it blocked, citations checked/bad, scope warnings; read by `scripts/stats.js` |
+| `gate.json` | written the one time `scripts/pre-edit-gate.js` fires this session, so it never fires twice |
 
 Session directories older than 7 days are pruned at session start.
+
+Two pointer files live at the *state base directory* (`$XEND_STATE_DIR`, `<scratchpad_dir>/xend`, `$CLAUDE_PLUGIN_DATA/sessions`, or `<tmpdir>/xend`, whichever resolves — one level up from the per-session directories above), written by `session-start.js` on every start so the CLI can find a session's state without a `--session` argument: `latest-session.json` (`{ id, dir, cwd }` for the most recent start) and `by-cwd/<sha1 of cwd>.json` (the same shape, keyed by working directory, so `plan next` run from a shell in the project's directory finds the right session).
 
 ## Native settings written by `/xend:setup <profile> --with-recommended`
 
