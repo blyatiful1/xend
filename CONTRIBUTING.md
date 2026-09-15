@@ -32,6 +32,15 @@ claude plugin validate . --strict # plugin and marketplace manifests
   `tests/ponytail.test.js` will fail otherwise.
 - New skills, agents or hooks add to every session's fixed prefix. Say in the PR what they
   cost in tokens and why that rent is worth paying.
+- **Agent reply formats** (the `Result: / Changed: / Verification: / Notes:` block in
+  `xend-worker`/`xend-worker-lite`, the citation and evidence lines in `xend-scout`/
+  `xend-reader`/`xend-reviewer`) are contracts parsed by `scripts/lib/verify.js`, not just
+  prose: changing the wording, field order or line format needs a matching change in
+  `verify.js` and in `tests/verify.test.js`, or `scripts/subagent-stop.js` silently stops
+  verifying what the agent claims. New hooks must never call a model and must never run a
+  command that is not checked against an explicit allowlist first (see
+  `scripts/lib/verify.js`'s `commandAllowed`); this holds for every hook, not only
+  `SubagentStop`.
 
 ## Reporting bugs
 
