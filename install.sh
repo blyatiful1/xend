@@ -2,9 +2,12 @@
 # xend installer: registers the marketplace and installs the plugin at user scope.
 #   curl -fsSL https://raw.githubusercontent.com/blyatiful1/xend/main/install.sh | bash
 # Options: XEND_PROFILE=lite|balanced|aggressive (default balanced), XEND_SCOPE=user|project (default user)
+#          XEND_WITH_PONYTAIL=1|0|ask  also install the upstream ponytail plugin
+#            (default: ask on a TTY, 0 when piped — `curl | bash` never installs a third-party plugin)
 set -euo pipefail
 
 REPO="${XEND_REPO:-blyatiful1/xend}"
+WITH_PONYTAIL="${XEND_WITH_PONYTAIL:-ask}"
 PROFILE="${XEND_PROFILE:-balanced}"
 SCOPE="${XEND_SCOPE:-user}"
 
@@ -28,6 +31,30 @@ else
   exit 0
 fi
 
+# Optional: the upstream ponytail plugin (MIT, Dietrich Gebert). xend works without it —
+# it injects its own adapted lean rules and defers to upstream whenever upstream is injecting.
+if [ "$WITH_PONYTAIL" = "ask" ]; then
+  if [ -t 0 ]; then
+    say ""
+    say "Optional: install the upstream ponytail plugin (MIT, Dietrich Gebert, https://github.com/DietrichGebert/ponytail)?"
+    say "It injects the ~1,382-token ruleset JetBrains measured (-10.3% cost, p=0.004). xend will defer to it."
+    printf 'Install ponytail? [y/N] '
+    read -r ans || ans=n
+    case "$ans" in y|Y|yes|YES) WITH_PONYTAIL=1 ;; *) WITH_PONYTAIL=0 ;; esac
+  else
+    WITH_PONYTAIL=0
+  fi
+fi
+
+if [ "$WITH_PONYTAIL" = "1" ]; then
+  say "Installing ponytail@ponytail (third party, MIT, Dietrich Gebert) ..."
+  claude plugin marketplace add DietrichGebert/ponytail >/dev/null 2>&1 || say "  could not add the ponytail marketplace; run: claude plugin marketplace add DietrichGebert/ponytail"
+  claude plugin install "ponytail@ponytail" -s "$SCOPE" -y || say "  could not install ponytail; run: claude plugin install ponytail@ponytail -s $SCOPE -y"
+  say "  ponytail owns the lean ruleset; xend will defer to it and add only a short reconciliation note."
+else
+  say "Lean ruleset: xend's own adapted rules (untested condensation of ponytail's; /xend:ponytail to change)."
+fi
+
 CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/xend"
 mkdir -p "$CFG_DIR"
 if [ ! -f "$CFG_DIR/config.json" ]; then
@@ -42,3 +69,4 @@ say "Done. Start a new Claude Code session, then:"
 say "  /xend:doctor                 audit this environment for token waste"
 say "  /xend:setup $PROFILE --with-recommended   apply recommended native settings (dry-run first without the flag)"
 say "  /xend:stats                  see what a session spent and what shaping saved"
+say "  /xend:ponytail [lite|full|ultra|off|rules]   set the lean build rules for a session"

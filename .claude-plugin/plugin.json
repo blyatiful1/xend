@@ -1,12 +1,26 @@
 {
   "name": "xend",
   "displayName": "xend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Spend fewer tokens in Claude Code without losing quality: lossless tool-output shaping, terse output style, cheap-model delegation, context checkpoints, native-lever setup, and a paired benchmark that measures it.",
-  "author": { "name": "blyatiful1", "url": "https://github.com/blyatiful1" },
+  "author": {
+    "name": "blyatiful1",
+    "url": "https://github.com/blyatiful1"
+  },
   "homepage": "https://github.com/blyatiful1/xend",
   "repository": "https://github.com/blyatiful1/xend",
   "license": "MIT",
-  "keywords": ["claude-code", "tokens", "cost", "context", "caveman", "efficiency", "hooks", "benchmark"],
+  "keywords": [
+    "claude-code",
+    "tokens",
+    "cost",
+    "context",
+    "caveman",
+    "efficiency",
+    "hooks",
+    "benchmark",
+    "ponytail",
+    "yagni"
+  ],
   "hooks": "./hooks/hooks.json"
 }

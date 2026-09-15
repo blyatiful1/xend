@@ -7,13 +7,76 @@
 //   node xend-cli.js set <session-id> <key> <v>   set a session override (terse, shape, enabled)
 //   node xend-cli.js profile [name]               print or set the user-level profile
 //   node xend-cli.js note <session-id> <text...>  append a note to the session checkpoint
+//   node xend-cli.js ponytail <session-id> [arg]  switch the lean level, or 'rules' / 'status'
 const fs = require('fs');
 const path = require('path');
 const config = require('./lib/config.js');
 const state = require('./lib/state.js');
 const context = require('./lib/context.js');
+const ponytail = require('./lib/ponytail.js');
 
 function arg(name) { const i = process.argv.indexOf(name); return i !== -1 ? process.argv[i + 1] : undefined; }
+
+
+function textLabel(cfg) {
+  return cfg.ponytailText === 'upstream' ? 'upstream-verbatim (measured)' : 'adapted (untested)';
+}
+
+function sessionPonytail(sid, cwd) {
+  const dir = state.sessionDir(sid);
+  const cfg = config.resolve({ cwd });
+  const sess = state.sessionOverrides(dir);
+  if (sess.ponytail) cfg.ponytail = sess.ponytail;
+  if (sess.ponytailText) cfg.ponytailText = sess.ponytailText;
+  const cached = state.readJson(path.join(dir, 'config.json'), null);
+  const pt = (cached && cached.ponytailDetected) || ponytail.detect({ env: process.env, cwd });
+  const o = ponytail.owns(pt, cfg);
+  return { dir, cfg, sess, pt, owns: o };
+}
+
+function ponytailStatus(s) {
+  const p = { upstreamOwns: s.owns.upstreamOwns, owns: s.owns.ownsLean, mode: s.pt.mode, root: s.pt.root, text: s.cfg.ponytailText, strict: s.cfg.ponytailStrict === true };
+  const block = context.build(s.cfg, { ponytail: p });
+  const lines = [
+    'lean level: ' + s.cfg.ponytail + (s.sess.ponytail ? ' (session override)' : ''),
+    'owner: ' + (s.owns.upstreamOwns ? 'ponytail plugin (xend defers; use /ponytail <level>)' : 'xend'),
+    'text: ' + textLabel(s.cfg) + (p.strict ? ', strict (no xend bridging text)' : ''),
+    'upstream: ' + (s.pt.installed ? 'installed via ' + s.pt.channel + (s.pt.version ? ' v' + s.pt.version : '') + (s.pt.root ? ' at ' + s.pt.root : '') + ', injecting=' + s.pt.injecting + ', mode=' + s.pt.mode : 'no evidence found'),
+    'session block: ' + Buffer.byteLength(block) + ' B (~' + Math.round(Buffer.byteLength(block) / 3.8) + ' tok)',
+    'evidence: ' + s.pt.evidence.join('; '),
+  ];
+  console.log(lines.join('\n'));
+}
+
+function ponytailCommand(sid, want, cwd) {
+  const s = sessionPonytail(sid, cwd);
+  if (want === 'status') return ponytailStatus(s);
+  if (want === 'rules') {
+    console.log('Full upstream ruleset: ' + ponytail.VENDOR_SKILL);
+    console.log('These rules are already active in this session (' + textLabel(s.cfg) + '). Read the file for reference only; do not restate it in your reply.');
+    return;
+  }
+  if (!config.PONYTAIL_LEVELS.includes(want)) {
+    console.log('ponytail must be one of: ' + config.PONYTAIL_LEVELS.join(', ') + ', rules, status');
+    process.exitCode = 1; return;
+  }
+  if (s.owns.upstreamOwns) {
+    console.log('The ponytail plugin owns the lean ruleset this session (mode ' + s.pt.mode + '); xend cannot change its level. Run /ponytail ' + want + ' instead, and do not claim the level changed.');
+    return;
+  }
+  if (s.cfg.ponytail === want) { console.log('Lean level already ' + want + '; nothing changed.'); return; }
+  state.setSessionOverride(s.dir, 'ponytail', want);
+  if (want === 'off') {
+    state.setSessionOverride(s.dir, 'ponytailInjected', false);
+    console.log('Lean off. Ignore the Lean block from the session start; no lean rules apply for the rest of this session.');
+    return;
+  }
+  if (s.sess.ponytailInjected === true) { console.log(ponytail.levelDelta(want)); return; }
+  const cold = Object.assign({}, s.cfg, { ponytail: want });
+  const parts = context.ponytailParts(cold, { text: cold.ponytailText, strict: cold.ponytailStrict === true, root: s.pt.root });
+  state.setSessionOverride(s.dir, 'ponytailInjected', parts.injected);
+  console.log(parts.parts.join('\n\n'));
+}
 
 function main() {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -44,8 +107,23 @@ function main() {
         process.exitCode = 1; return;
       }
       if (key === 'terse' && value === 'off') v = 'off';
+      for (const [k, levels] of [['ponytail', config.PONYTAIL_LEVELS], ['ponytailText', config.PONYTAIL_TEXTS]]) {
+        if (key !== k) continue;
+        if (!levels.includes(String(value))) {
+          console.log(k + ' must be one of: ' + levels.join(', '));
+          process.exitCode = 1; return;
+        }
+        // line 40 above coerced the string 'off' to boolean false; session-start's
+        // `if (overrides.ponytail)` would then skip it and the switch would silently do nothing.
+        v = String(value);
+      }
       state.setSessionOverride(dir, key, v);
       console.log('xend session override: ' + key + ' = ' + JSON.stringify(v));
+      return;
+    }
+    case 'ponytail': {
+      const [sid, rawArg] = rest;
+      ponytailCommand(sid, String(rawArg || 'status').toLowerCase(), cwd);
       return;
     }
     case 'profile': {
@@ -76,7 +154,7 @@ function main() {
       return;
     }
     default:
-      console.log('usage: xend-cli.js config|context|state-dir|set|profile|note');
+      console.log('usage: xend-cli.js config|context|state-dir|set|profile|note|ponytail');
   }
 }
 

@@ -37,6 +37,7 @@ Then, in a new session:
 |---|---|---|
 | Measure | session stats from Claude Code's transcript (tokens, cache hit ratio, cost by model, largest tool results, re-reads); static audit of memory files, settings, MCP servers and per-turn hooks with ranked fixes | `/xend:stats`, `/xend:doctor` |
 | Say less | caveman-compatible terse style (`lite`, `full`, `ultra`) with hard exemptions: code, errors, numbers, security warnings, and anything persisted outside chat stay exact | session block, `/xend:terse` |
+| Build less | ponytail's lazy-senior-dev ladder (YAGNI, reuse what is here, stdlib, native feature, one line) injected at SessionStart; xend defers to the upstream ponytail plugin when one is installed | session block, `/xend:ponytail` |
 | Read less | deterministic, recoverable shaping of tool results: escape codes, progress bars, repeated lines, passing-test rows and install chatter removed; very long generic output cut to head and tail with the original saved and named; byte-identical command re-runs shortened; grep/glob lists capped with truthful totals | PostToolUse hook (`updatedToolOutput`) |
 | Delegate | `xend-scout` (Haiku, citations only), `xend-reader` (Haiku, condense one artifact), `xend-worker` (Sonnet), `xend-reviewer` (Sonnet), and a routing rule: accept a cheaper model's output only after verifying it | `agents/`, `/xend:route` |
 | Reset cheaply | a checkpoint (edited files, verification commands, decisions) written before compaction and re-injected after `/compact` or `/clear`, so `/clear` becomes the default way to end a task | PreCompact hook, `/xend:checkpoint` |
@@ -48,9 +49,9 @@ What xend never does: rewrite your prompts, rewrite memory files into telegraphi
 
 | Profile | Adds | Use when |
 |---|---|---|
-| `lite` | terse `lite`, noise-only output cleanup, repeat shortening, audits | you want a conservative start and your own numbers first |
-| `balanced` (default) | terse `full`, structured shaping (tests, installs, long generic output), delegation, checkpoints | everyday work |
-| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental) | long sessions; validate with the bench first |
+| `lite` | terse `lite`, noise-only output cleanup, repeat shortening, audits, plus lean `lite` (xend's adapted ruleset) | you want a conservative start and your own numbers first |
+| `balanced` (default) | terse `full`, structured shaping (tests, installs, long generic output), delegation, checkpoints, plus lean `full` (xend's adapted ruleset) | everyday work |
+| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental), plus lean `full` with the **upstream-verbatim** ruleset (the text JetBrains measured; ~1,400 tokens more per session, which only amortizes on long sessions) | long sessions; validate with the bench first |
 
 Switch with `/xend:profile <name>` or a `.xend.json` in the repo. Every transform has a kill switch (`XEND_SHAPE_TESTRUNNERS=0`, `XEND_TERSE=off`, ...). Details: `docs/PROFILES.md`.
 
@@ -62,6 +63,7 @@ Honest numbers beat advertised ones. Independent measurements of the techniques 
 - Command-rewriting filters (rtk): **+7.6% cost** and more turns in the same harness. This is the failure mode xend's marker contract and recoverability rules are designed against.
 - Masking old tool results: 52% cheaper with a slightly higher solve rate on SWE-bench Verified (JetBrains Research). xend enables Anthropic's server-side version in the `aggressive` profile.
 - Prompt caching: the fixed prefix measured here was 32,062 tokens per request; cache reads cost a tenth of a miss. Nothing xend injects varies between turns.
+- The ponytail ruleset: **-10.3% cost (p = 0.004)**, -15.4% code (p = 0.088, against an advertised -54%), -11% time, and no significant quality difference across 80 paired tasks (JetBrains; 251 trials, $246.09). The load-bearing finding is about *delivery*, not content: "If you copy the SKILL.md into a skills folder and let the model decide when to use it, it will self-activate zero times." That is why xend injects it from the SessionStart hook. **Two honest caveats:** only the cost figure is statistically solid — the code figure is not — and the text xend injects by default on `lite` and `balanced` is xend's own 240-token condensation, **not** the ~1,382-token artifact those numbers describe; this text is xend's adaptation and is untested. Set `XEND_PONYTAIL_TEXT=upstream` (the default on `aggressive`) to run the measured text — that text is upstream-verbatim (the measured artifact).
 
 xend's own paired runs (Claude Sonnet 5 at low effort, same tasks under both arms; `bench/results/`):
 
@@ -101,7 +103,7 @@ Two native eval cases for `claude plugin eval` live in `evals/` (LLM-graded): co
 
 ## Credits
 
-The terse style descends from [caveman](https://github.com/JuliusBrussee/caveman) (MIT), whose maintainers also published the honest-numbers accounting that shaped this project's measurement rules. [rtk](https://github.com/rtk-ai/rtk) and JetBrains' benchmark of it defined the failure mode to avoid. [claude-mem](https://github.com/thedotmack/claude-mem) showed hook-based session lifecycle handling; [ccusage](https://github.com/ccusage/ccusage) showed transcript-based accounting. Anthropic's Claude Code documentation and cost guidance are the source for every native lever.
+The terse style descends from [caveman](https://github.com/JuliusBrussee/caveman) (MIT), whose maintainers also published the honest-numbers accounting that shaped this project's measurement rules. [rtk](https://github.com/rtk-ai/rtk) and JetBrains' benchmark of it defined the failure mode to avoid. [claude-mem](https://github.com/thedotmack/claude-mem) showed hook-based session lifecycle handling; [ccusage](https://github.com/ccusage/ccusage) showed transcript-based accounting. Anthropic's Claude Code documentation and cost guidance are the source for every native lever. The lean build rules are adapted from [ponytail](https://github.com/DietrichGebert/ponytail) (MIT, Dietrich Gebert), whose only measured configuration — injection at SessionStart — is the one xend reproduces; the verbatim ruleset is vendored under `vendor/ponytail/`. See `THIRD_PARTY_NOTICES.md`.
 
 ## License
 

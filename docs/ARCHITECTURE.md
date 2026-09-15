@@ -36,6 +36,7 @@ no database, and no dependency beyond Node.js 18+.
 |---|---|---|---|
 | L0 Measure | Know where tokens go before and after | `scripts/stats.js` (session JSONL), `scripts/doctor.js` (static audit), `bench/` (paired A/B) | all |
 | L1 Say less | Terse output style; caveman-compatible levels | SessionStart `additionalContext` (once per session, cache-stable) + `/xend:terse` skill | lite: `lite`, balanced: `full` |
+| L1b Build less | Lazy-solution ladder: YAGNI, reuse, stdlib, native, one line; root-cause bug fixes | SessionStart `additionalContext` after upstream detection + `/xend:ponytail` | lite: `lite`, balanced: `full`, aggressive: `full` (upstream-verbatim text) |
 | L2 Read less | Lossless-recoverable shaping of tool results | PostToolUse `updatedToolOutput` on Bash, Read, Grep, Glob, MCP tools | balanced |
 | L3 Delegate cheaply | Haiku/Sonnet subagents with a verify-or-escalate contract | `agents/*.md` with `model:` frontmatter + `/xend:route` skill | balanced |
 | L4 Keep context lean | Checkpoints around `/clear` and compaction; reading discipline | PreCompact hook, SessionStart(`compact|clear`), `/xend:checkpoint` | balanced |
@@ -82,13 +83,34 @@ Invariants:
 
 ## Session context injected at SessionStart
 
-One stable block (~410 tokens after trimming, no timestamps, no per-turn re-injection so the prompt cache stays warm; together with seven short skill descriptions and four agent descriptions the plugin's fixed prefix is about 765 tokens, roughly 2.4% of a typical 32,000-token prefix; the benchmark showed that even this is not amortized on five-turn tasks):
+One stable block (no timestamps, no per-turn re-injection so the prompt cache stays warm). At
+`balanced` with the adapted lean rules it is **2,578 B / ~678 tokens** (1,549 B / ~408 tokens with
+`ponytail: off`). Together with eight short skill descriptions and four agent descriptions the
+plugin's fixed prefix is about **1,033 tokens, roughly 3.2%** of a typical 32,000-token prefix; the
+benchmark showed that even the smaller prefix is not amortized on five-turn tasks (~0.8% cost per
+100 tokens), which is why the cheap adapted text is the default on `lite` and `balanced`. Contents:
 - terse rules for the active level and their exemptions (security warnings, ordered instructions,
   anything persisted outside chat stays in full prose),
 - reading discipline (grep before read, ranged reads, no re-reads of unchanged files, delegate
   broad exploration to `xend-scout`),
 - the condensed-output contract (what a `[xend]` marker means, where the original lives, never
-  re-run a command to see more).
+  re-run a command to see more),
+- the lean build rules (the ladder, root-cause bug fixes, no unrequested abstraction), placed after
+  the reading rules so "trace the flow under the reading rule above" resolves to text already seen.
+
+`vendor/ponytail/` costs **zero** tokens: Claude Code scans only `skills/` for model-invocable
+skills, so the byte-identical vendored ruleset sits outside the skill index and is read only when
+`ponytailText: upstream` is active or someone runs `/xend:ponytail rules`. Hooks cost nothing in the
+skill index either.
+
+**Detect-then-defer.** `scripts/lib/ponytail.js` runs one bounded, offline detection at SessionStart
+(≤ ~25 stat/read calls, every one guarded) and caches the result in the session config, so per-call
+hooks never repeat the walk. If an upstream ponytail plugin can actually inject, it owns the topic
+— including its own `off` state — and xend emits a short reconciliation note instead of a second
+copy. Otherwise xend owns it. Exactly one branch emits a ruleset, so the **one-copy invariant**
+holds by construction; `tests/ponytail.test.js` asserts it across the full
+(channel × mode × level × upstream switch × text) matrix. A detection failure degrades to "not
+installed", which costs a visible duplicate at worst, never a silently missing ruleset.
 
 On `SessionStart(source: compact|clear)` the block is re-injected together with the session's checkpoint
 if one exists. `resume` is not matched: the block is already in the resumed history.
