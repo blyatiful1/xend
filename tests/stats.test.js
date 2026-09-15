@@ -82,6 +82,109 @@ test('findShapingLog: returns null when nothing exists at any candidate path', (
   assert.equal(found, null);
 });
 
+test('verifyLogCandidates / findVerifyLog: finds a log under XEND_STATE_DIR/<session>/verify.jsonl', () => {
+  const stateDir = mkTmpDir('xend-state-');
+  try {
+    const sessionId = 'sess-verify';
+    const sessDir = path.join(stateDir, sessionId);
+    fs.mkdirSync(sessDir, { recursive: true });
+    const logPath = path.join(sessDir, 'verify.jsonl');
+    fs.writeFileSync(logPath, '');
+
+    const found = stats.findVerifyLog(sessionId, { XEND_STATE_DIR: stateDir });
+    assert.equal(found, logPath);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('findVerifyLog: returns null when nothing exists at any candidate path', () => {
+  const found = stats.findVerifyLog('no-such-session', { XEND_STATE_DIR: '/definitely/not/a/real/dir' });
+  assert.equal(found, null);
+});
+
+test('summarizeVerifyLog: tallies verdicts, citation and scope counters, skipping malformed lines', async () => {
+  const dir = mkTmpDir('xend-verify-');
+  const file = path.join(dir, 'verify.jsonl');
+  try {
+    const lines = [
+      JSON.stringify({ ts: 1, kind: 'worker', task: 'T1', claimed: 'PASS', verdict: 'pass', exit: 0, checked: 2, bad: 0, scope: 0 }),
+      'not valid json',
+      JSON.stringify({ ts: 2, kind: 'worker', task: 'T2', claimed: 'PASS', verdict: 'mismatch', exit: 1, checked: 1, bad: 0, scope: 1 }),
+      JSON.stringify({ ts: 3, kind: 'worker-lite', task: 'T3', claimed: 'FAIL', verdict: 'fail', exit: 1, checked: 0, bad: 0, scope: 0 }),
+      JSON.stringify({ ts: 4, kind: 'scout', task: null, claimed: null, verdict: 'bad-citations', exit: null, checked: 3, bad: 2, scope: null }),
+      JSON.stringify({ ts: 5, kind: 'worker', task: 'T4', claimed: 'PASS', verdict: 'unverifiable', exit: null, checked: 0, bad: 0, scope: 0 }),
+      JSON.stringify({ ts: 6, kind: 'worker', task: 'T5', claimed: null, verdict: 'malformed', exit: null, checked: 0, bad: 0, scope: 0 }),
+    ];
+    fs.writeFileSync(file, lines.join('\n') + '\n');
+
+    const summary = await stats.summarizeVerifyLog(file);
+    assert.equal(summary.runs, 6);
+    assert.equal(summary.badLines, 1);
+    assert.equal(summary.pass, 1);
+    assert.equal(summary.mismatch, 1);
+    assert.equal(summary.fail, 1);
+    assert.equal(summary.unverifiable, 1);
+    assert.equal(summary.malformed, 1);
+    assert.equal(summary.badCitations, 1);
+    assert.equal(summary.citationsChecked, 2 + 1 + 0 + 3 + 0 + 0);
+    assert.equal(summary.citationsBad, 0 + 0 + 0 + 2 + 0 + 0);
+    assert.equal(summary.scopeWarnings, 0 + 1 + 0 + 0 + 0); // null scope is skipped, not summed as 0
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('printText: renders a Delegation section with verdict counts when a delegation summary is given', () => {
+  const report = {
+    file: 't.jsonl', sessionId: 's1', firstTimestamp: null, lastTimestamp: null,
+    turnCount: 0, totalTurnCount: 0, windowed: false,
+    totals: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 },
+    contextSizeEnd: 0, cacheHitRatio: null, costTotal: 0, hasUnknownModelCost: false, costByModel: {},
+    promptSizes: [], toolUsage: {}, topResults: [], reReadFiles: [], reRunBashCommands: [],
+    charTotals: { toolResultChars: 0, assistantTextChars: 0, otherChars: 0, total: 0, toolResultShare: null, assistantTextShare: null, otherShare: null },
+  };
+  const delegation = {
+    file: '/tmp/verify.jsonl', runs: 4, pass: 2, mismatch: 1, fail: 0, unverifiable: 1, malformed: 0,
+    badCitations: 1, citationsChecked: 6, citationsBad: 2, scopeWarnings: 1, badLines: 0,
+  };
+  const lines = [];
+  const origLog = console.log;
+  console.log = (s) => lines.push(s);
+  try {
+    stats.printText(report, { source: 'latest' }, null, delegation);
+  } finally {
+    console.log = origLog;
+  }
+  const out = lines.join('\n');
+  assert.ok(out.includes('7. Delegation'));
+  assert.ok(out.includes('subagent runs: 4'));
+  assert.ok(out.includes('verified pass'));
+  assert.ok(out.includes('mismatches caught'));
+  assert.ok(out.includes('bad-citation replies'));
+  assert.ok(out.includes('6 / 2'));
+});
+
+test('printText: omits the Delegation section entirely when no delegation summary is given', () => {
+  const report = {
+    file: 't.jsonl', sessionId: 's1', firstTimestamp: null, lastTimestamp: null,
+    turnCount: 0, totalTurnCount: 0, windowed: false,
+    totals: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 },
+    contextSizeEnd: 0, cacheHitRatio: null, costTotal: 0, hasUnknownModelCost: false, costByModel: {},
+    promptSizes: [], toolUsage: {}, topResults: [], reReadFiles: [], reRunBashCommands: [],
+    charTotals: { toolResultChars: 0, assistantTextChars: 0, otherChars: 0, total: 0, toolResultShare: null, assistantTextShare: null, otherShare: null },
+  };
+  const lines = [];
+  const origLog = console.log;
+  console.log = (s) => lines.push(s);
+  try {
+    stats.printText(report, { source: 'latest' }, null, null);
+  } finally {
+    console.log = origLog;
+  }
+  assert.ok(!lines.join('\n').includes('Delegation'));
+});
+
 test('summarizeShapingLog: sums before-after savings and tallies kinds, skipping malformed lines', async () => {
   const dir = mkTmpDir('xend-shaping-');
   const file = path.join(dir, 'shaping.jsonl');

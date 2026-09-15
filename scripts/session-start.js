@@ -14,6 +14,9 @@ function main() {
   const input = io.readHookInput() || {};
   const cfg = config.resolve({ cwd: input.cwd });
   const dir = state.sessionDir(input.session_id, process.env, input.scratchpad_dir);
+  // pointers so the CLI (run from a skill or a shell, outside this hook's stdin) can find this
+  // session's state dir without a --session argument
+  state.writeSessionPointers(process.env, input.session_id, dir, input.cwd);
   // detect once per session; the cached config carries it so no later hook re-walks the tree
   const pt = ponytail.detect({ env: process.env, cwd: input.cwd });
   cfg.ponytailDetected = pt;
@@ -23,9 +26,10 @@ function main() {
   if (overrides.terse) cfg.terse = overrides.terse;
   if (overrides.ponytail) cfg.ponytail = overrides.ponytail;
   if (overrides.ponytailText) cfg.ponytailText = overrides.ponytailText;
+  if (overrides.architect === false) cfg.architect = Object.assign({}, cfg.architect, { enabled: false });
   if (overrides.enabled === false) return;
   const source = input.source || 'startup';
-  const opts = {};
+  const opts = { cliPath: path.join(__dirname, 'xend-cli.js') };
   if (source === 'compact' || source === 'clear') {
     opts.reset = source;
     try { fs.unlinkSync(path.join(dir, 'dedupe.json')); } catch (_) {}

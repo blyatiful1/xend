@@ -192,6 +192,77 @@ test('checkSettings: flags a hook command containing $(date) as a cache-breaker'
   }
 });
 
+test('checkSettings: flags CLAUDE_CODE_SUBAGENT_MODEL set via settings env', () => {
+  const home = mkTmpDir('xend-doc-home-');
+  const dir = mkTmpDir('xend-doc-subagentmodel-');
+  const origHome = os.homedir;
+  try {
+    os.homedir = () => home;
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, '.claude', 'settings.json'),
+      JSON.stringify({ env: { CLAUDE_CODE_SUBAGENT_MODEL: 'opus' } })
+    );
+
+    const { findings } = doctor.checkSettings(dir);
+    const f = findings.find((x) => /CLAUDE_CODE_SUBAGENT_MODEL overrides/i.test(x.title));
+    assert.ok(f);
+    assert.equal(f.impact, 'medium');
+    assert.match(f.found, /opus/);
+    assert.match(f.found, /settings\.json env/);
+  } finally {
+    os.homedir = origHome;
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('checkSettings: flags CLAUDE_CODE_SUBAGENT_MODEL set via process.env', () => {
+  const home = mkTmpDir('xend-doc-home-');
+  const dir = mkTmpDir('xend-doc-subagentmodel-env-');
+  const origHome = os.homedir;
+  const hadEnv = Object.prototype.hasOwnProperty.call(process.env, 'CLAUDE_CODE_SUBAGENT_MODEL');
+  const origEnv = process.env.CLAUDE_CODE_SUBAGENT_MODEL;
+  try {
+    os.homedir = () => home;
+    process.env.CLAUDE_CODE_SUBAGENT_MODEL = 'haiku';
+
+    const { findings } = doctor.checkSettings(dir);
+    const f = findings.find((x) => /CLAUDE_CODE_SUBAGENT_MODEL overrides/i.test(x.title));
+    assert.ok(f);
+    assert.match(f.found, /haiku/);
+    assert.match(f.found, /process environment/);
+  } finally {
+    os.homedir = origHome;
+    if (hadEnv) process.env.CLAUDE_CODE_SUBAGENT_MODEL = origEnv;
+    else delete process.env.CLAUDE_CODE_SUBAGENT_MODEL;
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('checkSettings: does NOT flag CLAUDE_CODE_SUBAGENT_MODEL when unset', () => {
+  const home = mkTmpDir('xend-doc-home-');
+  const dir = mkTmpDir('xend-doc-subagentmodel-unset-');
+  const origHome = os.homedir;
+  const hadEnv = Object.prototype.hasOwnProperty.call(process.env, 'CLAUDE_CODE_SUBAGENT_MODEL');
+  const origEnv = process.env.CLAUDE_CODE_SUBAGENT_MODEL;
+  try {
+    os.homedir = () => home;
+    delete process.env.CLAUDE_CODE_SUBAGENT_MODEL;
+
+    const { findings } = doctor.checkSettings(dir);
+    const f = findings.find((x) => /CLAUDE_CODE_SUBAGENT_MODEL overrides/i.test(x.title));
+    assert.equal(f, undefined);
+  } finally {
+    os.homedir = origHome;
+    if (hadEnv) process.env.CLAUDE_CODE_SUBAGENT_MODEL = origEnv;
+    else delete process.env.CLAUDE_CODE_SUBAGENT_MODEL;
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('pluginNames: handles array form and object form (skipping disabled)', () => {
   assert.deepEqual(doctor.pluginNames(['a', 'b']), ['a', 'b']);
   assert.deepEqual(doctor.pluginNames({ a: true, b: false, c: true }), ['a', 'c']);

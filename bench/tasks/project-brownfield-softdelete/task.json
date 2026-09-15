@@ -1,0 +1,10 @@
+{
+  "name": "project-brownfield-softdelete",
+  "category": "project",
+  "difficulty": 3,
+  "prompt": "Implement the change described in TASK.md across the existing `invsys` codebase (models -> repos -> services -> api -> cli) exactly as specified: pinned method names, signatures, status codes, and the clock injection point. Keep `python3 -m pytest -q tests` passing. A larger hidden test suite covering every requirement in TASK.md, including edge cases across every layer, will run afterwards. Standard library only, no third-party dependencies. Do not rewrite unrelated code.",
+  "timeout_s": 2400,
+  "max_turns": 150,
+  "budget_usd": 12,
+  "tools": "Bash,Read,Edit,Write,MultiEdit,Grep,Glob,Agent"
+}

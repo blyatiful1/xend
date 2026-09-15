@@ -1,6 +1,7 @@
 'use strict';
 // Builds the stable session context block. No timestamps, no per-turn variation:
 // the block is injected once per session start so the prompt cache stays warm.
+const path = require('path');
 const ponytail = require('./ponytail.js');
 
 const TERSE = {
@@ -12,11 +13,27 @@ const TERSE = {
 
 const TERSE_EXEMPTIONS = 'Normal prose for security warnings, irreversible-action confirmations, ordered multi-step instructions, anything persisted outside chat (code, comments, commits, PR and issue text, docs, memory files), and when the user asks for clarity.';
 
-const READING = 'Reading: Grep or Glob before Read; read large files by range; do not re-read unchanged files; verify edits with a targeted read or git diff; batch independent tool calls.';
+const READING = 'Reading: Grep or Glob before Read; read large files by range; do not re-read unchanged files; verify edits with a targeted read or git diff; batch independent tool calls; prefer quiet test-runner flags (pytest -q, jest --silent, go test without -v) and ask for verbose output only for a failing test.';
 
 const CONDENSED = 'A tool result ending with a [xend] line was condensed deterministically (escape codes, progress bars, passing-test rows or install chatter removed; very long generic output cut to head and tail; a repeat of a recent command shortened). Errors, failures, diffs and summaries are always kept: treat it as complete. If the marker names a file, that file holds the full original. Do not re-run a command only to see the condensed part; re-run when state may have changed.';
 
 const DELEGATION = 'Subagents xend-scout, xend-reader (Haiku) and xend-worker, xend-reviewer (Sonnet) exist for bulk work only (five or more tool calls, or long output you would otherwise read); each pays a cold prefix, and their output must be verified before use.';
+
+// scripts/xend-cli.js, used verbatim inside ARCHITECT below; session-start.js and the `context`
+// CLI command both pass their own resolved absolute path via opts.cliPath, but a default keeps
+// the block sane for any other caller.
+const DEFAULT_CLI_PATH = path.join(__dirname, '..', 'xend-cli.js');
+
+// One paragraph, SPEC-architect.md section 4. Injected after DELEGATION when architect mode is
+// enabled; the CLI path is the only environment-specific string in it, so the block otherwise
+// stays free of per-turn variation. `gate` (SPEC section 13) appends one sentence noting the
+// mechanical floor pre-edit-gate.js enforces; omit or pass false to leave it out.
+function architectText(cliPath, gate) {
+  const p = cliPath || DEFAULT_CLI_PATH;
+  let text = 'Architect mode: for work touching 3+ files or needing 8+ tool calls, plan first, then let builders build; keep file contents out of your own context. 1) Locate with xend-scout; outline a file with node "' + p + '" outline <file>; read only the interfaces you must pin. 2) Write the plan: node "' + p + '" plan set <<\'EOF\' {json} EOF — tasks small, fully specified (files, spec, verify command, tier lite=Haiku by default (a precise spec is enough), worker=Sonnet only where judgement is needed, deps). 3) node "' + p + '" plan next prints ready briefs; dispatch each with one Agent call (subagent_type xend-worker-lite or xend-worker, prompt = the brief); put independent tasks in the same message. 4) xend re-runs every builder\'s verify command; a mismatch is flagged in the builder\'s own reply and in plan status. Trust those, not the claim. 5) Repeat plan next until empty; tasks it lists under "do yourself" are yours. 6) Run the project verify command; dispatch fix tasks for failures; then summarize. Below the size floor, work directly.';
+  if (gate) text += ' Above three files edited directly, xend refuses further direct edits until a plan exists.';
+  return text;
+}
 
 // LEAN/LEAN_LEVEL/LEAN_UPSTREAM/LEAN_BRIDGE: adapted from ponytail (MIT, Dietrich Gebert),
 // condensed and reconciled with xend's terse and reading rules — NOT upstream's wording and NOT
@@ -70,7 +87,8 @@ function build(cfg, opts) {
   opts = opts || {};
   const parts = [];
   const lean = ponytailParts(cfg, opts.ponytail);
-  parts.push('xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + lean.suffix + ').');
+  const archOn = !!(cfg.architect && cfg.architect.enabled);
+  parts.push('xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + lean.suffix + (archOn ? ', architect' : '') + ').');
   if (opts.reset) parts.push('Context was reset (' + opts.reset + '); the rules below apply again.');
   if (cfg.terse && cfg.terse !== 'off' && TERSE[cfg.terse]) {
     parts.push(TERSE[cfg.terse]);
@@ -80,8 +98,9 @@ function build(cfg, opts) {
   if (cfg.shape && cfg.shape.enabled) parts.push(CONDENSED);
   for (const l of lean.parts) parts.push(l);
   if (cfg.delegation !== false) parts.push(DELEGATION);
+  if (archOn) parts.push(architectText(opts.cliPath, cfg.architect.gate !== false));
   if (opts.checkpoint) parts.push('Checkpoint from before the reset:\n' + opts.checkpoint.trim());
   return parts.join('\n\n');
 }
 
-module.exports = { build, ponytailParts, TERSE, TERSE_EXEMPTIONS, READING, CONDENSED, DELEGATION, LEAN, LEAN_LEVEL, LEAN_UPSTREAM, LEAN_BRIDGE };
+module.exports = { build, ponytailParts, TERSE, TERSE_EXEMPTIONS, READING, CONDENSED, DELEGATION, LEAN, LEAN_LEVEL, LEAN_UPSTREAM, LEAN_BRIDGE, architectText, DEFAULT_CLI_PATH };

@@ -1,0 +1,10 @@
+{
+  "name": "project-ledger-cli",
+  "category": "project",
+  "difficulty": 3,
+  "prompt": "Implement the project described in SPEC.md in this directory, exactly as specified: build the `ledger` double-entry bookkeeping package (six modules: model, store, journal, report, importer, cli) with the exact module names, function/class signatures, exception types, JSONL schema, and CLI subcommand output formats and exit codes that SPEC.md pins. Make `python3 -m pytest -q tests` pass (public tests). A larger hidden test suite covering every requirement in SPEC.md, including edge cases and error paths, will be run afterwards. Do not add any dependency; standard library only. Do not write outside the `ledger/` package and `tests/` directories.",
+  "timeout_s": 2400,
+  "max_turns": 150,
+  "budget_usd": 12,
+  "tools": "Bash,Read,Edit,Write,MultiEdit,Grep,Glob,Agent"
+}

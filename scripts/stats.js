@@ -180,9 +180,81 @@ async function summarizeShapingLog(filePath) {
   };
 }
 
+// --- verify (delegation) log -----------------------------------------------------
+
+function verifyLogCandidates(sessionId, env) {
+  const candidates = [];
+  if (env.XEND_STATE_DIR) {
+    candidates.push(path.join(env.XEND_STATE_DIR, 'verify.jsonl'));
+    if (sessionId) candidates.push(path.join(env.XEND_STATE_DIR, sessionId, 'verify.jsonl'));
+  }
+  if (env.CLAUDE_PLUGIN_DATA && sessionId) {
+    candidates.push(path.join(env.CLAUDE_PLUGIN_DATA, 'sessions', sessionId, 'verify.jsonl'));
+  }
+  if (sessionId) {
+    candidates.push(path.join(env.TMPDIR || os.tmpdir(), 'xend', sessionId, 'verify.jsonl'));
+  }
+  return candidates;
+}
+
+function findVerifyLog(sessionId, env) {
+  for (const candidate of verifyLogCandidates(sessionId, env)) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch (_) { /* ignore */ }
+  }
+  return null;
+}
+
+// Summarizes <state>/verify.jsonl, written by scripts/subagent-stop.js (docs/SPEC-architect.md
+// section 7 step 10): one record per subagent run with its verdict and citation/scope counts.
+async function summarizeVerifyLog(filePath) {
+  const rl = readline.createInterface({ input: fs.createReadStream(filePath, { encoding: 'utf8' }), crlfDelay: Infinity });
+  let runs = 0, pass = 0, mismatch = 0, fail = 0, unverifiable = 0, malformed = 0, badCitations = 0;
+  let citationsChecked = 0, citationsBad = 0, scopeWarnings = 0, badLines = 0;
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    let rec;
+    try {
+      rec = JSON.parse(line);
+    } catch (_) {
+      badLines++;
+      continue;
+    }
+    if (!rec || typeof rec !== 'object') continue;
+    runs++;
+    switch (rec.verdict) {
+      case 'pass': pass++; break;
+      case 'mismatch': mismatch++; break;
+      case 'fail': fail++; break;
+      case 'unverifiable': unverifiable++; break;
+      case 'malformed': malformed++; break;
+      case 'bad-citations': badCitations++; break;
+      default: break;
+    }
+    if (typeof rec.checked === 'number') citationsChecked += rec.checked;
+    if (typeof rec.bad === 'number') citationsBad += rec.bad;
+    if (typeof rec.scope === 'number') scopeWarnings += rec.scope;
+  }
+  return {
+    file: filePath,
+    runs,
+    pass,
+    mismatch,
+    fail,
+    unverifiable,
+    malformed,
+    badCitations,
+    citationsChecked,
+    citationsBad,
+    scopeWarnings,
+    badLines,
+  };
+}
+
 // --- report -> text ------------------------------------------------------------
 
-function printText(report, resolved, shaping) {
+function printText(report, resolved, shaping, delegation) {
   const lines = [];
   lines.push(`xend stats -- ${report.file}  (${resolved.source})`);
   const sess = report.sessionId ? `session ${report.sessionId}` : 'session unknown';
@@ -306,6 +378,25 @@ function printText(report, resolved, shaping) {
   } else {
     lines.push('  not enough data to estimate.');
   }
+  lines.push('');
+
+  // 7. Delegation (xend architect mode: what the deterministic verifier found, spec section 7)
+  if (delegation) {
+    lines.push('7. Delegation');
+    lines.push(`  log: ${delegation.file}`);
+    lines.push(`  subagent runs: ${fmtInt(delegation.runs)}`);
+    const rows = [
+      ['  verified pass', fmtInt(delegation.pass)],
+      ['  mismatches caught', fmtInt(delegation.mismatch)],
+      ['  fail (claimed)', fmtInt(delegation.fail)],
+      ['  unverifiable', fmtInt(delegation.unverifiable)],
+      ['  malformed', fmtInt(delegation.malformed)],
+      ['  bad-citation replies', fmtInt(delegation.badCitations)],
+      ['  citations checked/bad', `${fmtInt(delegation.citationsChecked)} / ${fmtInt(delegation.citationsBad)}`],
+      ['  scope warnings', fmtInt(delegation.scopeWarnings)],
+    ];
+    lines.push(table(rows, ['l', 'r']));
+  }
 
   console.log(lines.join('\n'));
 }
@@ -348,12 +439,14 @@ async function main() {
   const sessionId = report.sessionId || path.basename(resolved.path, '.jsonl');
   const shapingPath = findShapingLog(sessionId, process.env);
   const shaping = shapingPath ? await summarizeShapingLog(shapingPath) : null;
+  const verifyPath = findVerifyLog(sessionId, process.env);
+  const delegation = verifyPath ? await summarizeVerifyLog(verifyPath) : null;
 
   if (args.json) {
-    console.log(JSON.stringify({ transcript: resolved.path, source: resolved.source, ...report, shaping }, null, 2));
+    console.log(JSON.stringify({ transcript: resolved.path, source: resolved.source, ...report, shaping, delegation }, null, 2));
     return;
   }
-  printText(report, resolved, shaping);
+  printText(report, resolved, shaping, delegation);
 }
 
 if (require.main === module) {
@@ -374,6 +467,9 @@ module.exports = {
   shapingLogCandidates,
   findShapingLog,
   summarizeShapingLog,
+  verifyLogCandidates,
+  findVerifyLog,
+  summarizeVerifyLog,
   truncateLabel,
   printText,
   main,

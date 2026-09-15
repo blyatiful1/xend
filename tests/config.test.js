@@ -22,6 +22,40 @@ test('profile defaults and env overrides', () => {
   assert.strictEqual(off.shape.enabled, false);
 });
 
+test('XEND_ARCHITECT_MIN_FILES overrides architect.minFiles; invalid values are ignored', () => {
+  const one = config.resolve({ env: { XEND_ARCHITECT_MIN_FILES: '1' }, cwd: os.tmpdir() });
+  assert.strictEqual(one.architect.minFiles, 1);
+  const five = config.resolve({ env: { XEND_ARCHITECT_MIN_FILES: '5', XEND_ARCHITECT: '1' }, cwd: os.tmpdir() });
+  assert.strictEqual(five.architect.minFiles, 5);
+  // rest of the architect shape survives the override (explicitly enabled here: architect is
+  // opt-in by default since bench r6/r7)
+  assert.strictEqual(five.architect.enabled, true);
+
+  const base = config.resolve({ env: {}, cwd: os.tmpdir() }).architect.minFiles; // balanced default: 4
+  for (const bad of ['0', '-1', '3.5', 'abc', '']) {
+    const cfg = config.resolve({ env: { XEND_ARCHITECT_MIN_FILES: bad }, cwd: os.tmpdir() });
+    assert.strictEqual(cfg.architect.minFiles, base, 'bad value: ' + JSON.stringify(bad));
+  }
+});
+
+test('config: architect.defaultTier is "lite" in every profile; XEND_ARCHITECT_TIER sets forceTier and is absent by default', () => {
+  for (const profileEnv of [{}, { XEND_PROFILE: 'lite' }, { XEND_PROFILE: 'aggressive' }]) {
+    const cfg = config.resolve({ env: profileEnv, cwd: os.tmpdir() });
+    assert.strictEqual(cfg.architect.defaultTier, 'lite', JSON.stringify(profileEnv));
+    assert.strictEqual(cfg.architect.forceTier, undefined, JSON.stringify(profileEnv));
+  }
+
+  const forcedLite = config.resolve({ env: { XEND_ARCHITECT_TIER: 'lite' }, cwd: os.tmpdir() });
+  assert.strictEqual(forcedLite.architect.forceTier, 'lite');
+  const forcedWorker = config.resolve({ env: { XEND_ARCHITECT_TIER: 'worker' }, cwd: os.tmpdir() });
+  assert.strictEqual(forcedWorker.architect.forceTier, 'worker');
+  // rest of the architect shape survives
+  assert.strictEqual(forcedWorker.architect.defaultTier, 'lite');
+
+  const bogus = config.resolve({ env: { XEND_ARCHITECT_TIER: 'bogus' }, cwd: os.tmpdir() });
+  assert.strictEqual(bogus.architect.forceTier, undefined);
+});
+
 test('project .xend.json overrides profile defaults and can switch profile', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-cfg-'));
   const sub = path.join(dir, 'a', 'b');
@@ -44,18 +78,36 @@ test('context block is stable and contains no timestamps', () => {
   assert.ok(a.includes('[xend]'));
 
   // Prefix regression guard: with no opts.ponytail the block is byte-identical to the
-  // pre-integration composition, so every existing caller and test is unaffected.
-  const preIntegration = [
-    'xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + ').',
+  // pre-integration composition, so every existing caller and test is unaffected. The default
+  // (balanced) profile now has architect off (opt-in after bench r6/r7), so no paragraph or
+  // header suffix is expected here; a second assertion below checks the block with it enabled.
+  const archOn = cfg.architect && cfg.architect.enabled;
+  assert.strictEqual(archOn, false, 'balanced default: architect is opt-in');
+  const preIntegrationParts = [
+    'xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + (archOn ? ', architect' : '') + ').',
     context.TERSE[cfg.terse], context.TERSE_EXEMPTIONS, context.READING, context.CONDENSED, context.DELEGATION,
-  ].join('\n\n');
+  ];
+  if (archOn) preIntegrationParts.push(context.architectText(undefined, cfg.architect.gate !== false));
+  const preIntegration = preIntegrationParts.join('\n\n');
   assert.strictEqual(a, preIntegration, 'ponytail integration changed the base block');
   const offOpts = { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: 'adapted', strict: false } };
   assert.strictEqual(context.build(Object.assign({}, cfg, { ponytail: 'off' }), offOpts), preIntegration);
 
+  // Same guard with architect explicitly enabled: the paragraph and header suffix appear.
+  const cfgArchOn = Object.assign({}, cfg, { architect: Object.assign({}, cfg.architect, { enabled: true }) });
+  const aOn = context.build(cfgArchOn, {});
+  const preIntegrationOnParts = [
+    'xend active (profile ' + cfgArchOn.profile + ', terse ' + cfgArchOn.terse + ', architect' + ').',
+    context.TERSE[cfgArchOn.terse], context.TERSE_EXEMPTIONS, context.READING, context.CONDENSED, context.DELEGATION,
+    context.architectText(undefined, cfgArchOn.architect.gate !== false),
+  ];
+  assert.strictEqual(aOn, preIntegrationOnParts.join('\n\n'), 'architect-enabled block regressed');
+
   // Three variant-aware ceilings. One number for all three would stop guarding anything:
   // the upstream-verbatim text is ~2.7x the adapted one and would swallow any regression.
-  const lean = (over) => context.build(Object.assign({}, cfg, over), { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: over.ponytailText || 'adapted', strict: false } });
+  // architect is held disabled here: these ceilings guard the ponytail/lean composition, not
+  // the (separately tested) architect paragraph.
+  const lean = (over) => context.build(Object.assign({}, cfg, { architect: { enabled: false } }, over), { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: over.ponytailText || 'adapted', strict: false } });
   const blockOff = lean({ ponytail: 'off' });
   const blockAdapted = lean({ ponytail: 'full', ponytailText: 'adapted' });
   const blockUpstream = lean({ ponytail: 'full', ponytailText: 'upstream' });

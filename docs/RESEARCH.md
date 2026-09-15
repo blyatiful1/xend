@@ -35,6 +35,11 @@ environment are marked *(measured here)*.
    single dependent chain is cheaper on one model.
 6. A 3% quality bound cannot be certified by a small one-shot suite. xend ships a paired benchmark
    that reports its own minimum detectable effect and accumulates evidence across runs.
+8. Planning on the main model and building with cheap, verified subagents keeps the main context tiny
+   but did not save money on any of three project tasks *(measured here)*: +99% to +251% against
+   solo Sonnet at equal quality, because builders pay cold prefixes and the planner pays for its
+   briefs in output tokens. The plain layers measured -24.6%, -3.9% and +14.6% against no plugin on the same three long
+   tasks (mean -4.6%, single trials): cheaper on two, dearer on one.
 
 ## 1. Where the tokens go
 
@@ -107,7 +112,7 @@ Each entry: **mechanism** → **xend implementation** → expected saving → ex
 
 **H16. Plugin overhead must be smaller than its savings, and on micro-tasks it is not.** Skill descriptions, agent descriptions and the session block are prefix cost paid once per session (cache write at 1.25x) and then re-read every turn (0.1x). *(measured here, run r2: 21 tasks x 2 trials, 4.5 turns on average)*: uncached input +12.7%, total tokens +6.4%, cost +9.0% (95% CI +6.1% to +11.9%) with the original ~1,250-token prefix, while quality rose 4.8 points and output tokens fell 3.2%. The shaping layer had nothing to condense on 20 of the 21 tasks. The prefix was then cut to ~765 tokens; run r3 measured cost +3.5% (interval including zero) with output tokens -8.6%. The conclusion stands regardless of the trim: on five-turn tasks a plugin cannot save money, because the only costs in play are the fixed prefix and a few hundred output tokens; xend's savings come from long sessions, reading-heavy work, and the native levers the bench does not exercise. → Grade A (own paired measurement). → Validation: bench by turn count; a long-session suite is the missing evidence.
 
-**H17. Subagents without memory files and at low effort.** `omitClaudeMd: true` and `effort: low` on scout and reader remove the memory prefix and the reasoning budget from cheap, mechanical work. → Grade C. → Status: shipped.
+**H17. Subagents without memory files and at low effort.** `omitClaudeMd: true` and `effort: low` on scout and reader remove the memory prefix and the reasoning budget from cheap, mechanical work. → Grade C. → Status: shipped. **Correction** *(verified here, Claude Code 2.1.272)*: plugin agents do not honour `omitClaudeMd` at all, so this claim was wrong for `xend-scout` and `xend-reader` as shipped; see H23.
 
 **H18. Statistical gating is the only honest guarantee, and it must cover cost.** A paired design with bootstrap intervals, a sign test and a stated minimum detectable effect; promotion only when three gates pass at once: the one-sided 95% lower bound of the pass-rate delta is above -3 points, the upper bound of the cost change is below zero, and the upper bound of the turn delta is at most +0.25. Tokens and cost come from `modelUsage` and `total_cost_usd` (subagents included), never from the main-loop `usage` field, which excludes subagent work and would flatter delegation. Evidence merges across runs. → `bench/`. → Grade A for the mathematics. → Status: shipped; see section 6 for what the current suite can and cannot detect.
 
@@ -134,6 +139,70 @@ Outcome of that gate (runs r4 and r5): the adapted text stays on in every profil
 no ponytail); the upstream-verbatim text failed the cost threshold (+16.7%) and is opt-in everywhere,
 because the JetBrains number was measured on a different, longer task distribution.
 
+**H20. Plan-then-build keeps reading out of the expensive model's context.** Mechanism: a model
+that never reads file bodies cannot re-bill them every later turn; cheap subagents read and write
+in disposable contexts discarded after their task, and the strong model integrates from short
+reports instead of the files themselves. → xend implementation: architect mode (L7) — a plan file
+and CLI (`xend-cli.js plan`), an architect paragraph in the session block, `xend-worker`/
+`xend-worker-lite` dispatch through the `Agent` tool, a `SubagentStop` verifier (H21), and a
+`PreToolUse` gate that makes the floor mechanical (H22). → Saving: **qualitative only** — no number
+is claimed here. The mechanism targets the single largest cost driver this document has found
+(section 1: reading is ~76% of context), at the price of a plan write, one cold builder prefix per
+task, and the architect paragraph itself (measured here at ~313 tokens, see `docs/ARCHITECTURE.md`
+L7). → Quality risk: a cheap builder can misjudge scope or misreport success; H21 is the mitigation,
+not a guarantee. → **Grade C until the project bench runs.** → Validation: `bench/tasks/project-*`,
+comparing `arch-<model>:xend:<model>:architect` against `solo-<model>:baseline:<model>`
+(`bench/README.md`). → Status: **measured** (runs r6, r7, r7b): +99% to +251% cost against solo Sonnet and +39% to +67% for a Fable planner against solo Fable, quality equal on every hidden test; demoted to opt-in in every profile. The mechanism works (tiny main context, verified Haiku builders at $0.05-0.17 per task); the economics do not, at this task size.
+
+**H21. Deterministic verification of cheap-model output.** Mechanism: a smaller model's claim of
+success is not evidence of success. FrugalGPT and RouteLLM's own numbers show routing keeps ~95% of
+quality on average, and name calibration — a small model confidently wrong — as the failure mode a
+cascade cannot catch by asking the same model again; Anthropic's guidance is to verify a subagent's
+output before trusting it. → xend implementation: `scripts/subagent-stop.js` re-runs the builder's
+own stated verify command (checked against a fixed allowlist, never run otherwise) instead of
+reading its claim, checks every `path:line` citation against the real files, and blocks a
+mismatched or malformed reply exactly once so the subagent restates truthfully. → Saving: none
+claimed; this is a trust mechanism, not a token-saving one, and costs one command re-run per worker
+task. → Quality: positive when it fires (a false PASS is caught before the architect trusts it),
+neutral otherwise. → **Grade B for the principle** (FrugalGPT/RouteLLM, Anthropic's verify-before-
+trust guidance), **C for this specific mechanism** (allowlist coverage, citation regex), which is
+unmeasured on its own. → Validation: `tests/verify.test.js` for the mechanism; the project bench's
+mismatch/unverifiable counts (`verify.jsonl`, surfaced by `scripts/stats.js`) for how often it
+actually catches something. → Status: shipped in `balanced` and `aggressive` (`architect.verify:
+true`).
+
+**H22. A behavioural rule needs a mechanical floor, not a suggestion.** Mechanism: an instruction
+competes with the model's own strong prior toward "just do the work," and a named escape hatch is
+an instruction the model can, and will, read as permission. → *(verified here)*: with the architect
+paragraph in context but no gate, a headless Sonnet session given a three-module package to
+implement did the whole task itself — 10 turns, no plan, zero subagents, $0.28; a first gate that
+refused the third direct edit once and named `plan off` as the way out was used exactly that way —
+11 turns, one denial, $0.18, then finished directly. → xend implementation:
+`scripts/pre-edit-gate.js`, a `PreToolUse` deny with no advertised exit, bounded to
+`architect.gateMaxDenials` denials per session. → Saving: none directly; this is what makes
+architect mode run at all, so any benefit is inherited from H20. → Quality risk: none to the edited
+code (it only delays a direct edit until a plan exists); the cost is turn tax, bounded by
+`gateMaxDenials`. → **Grade A for the negative finding** (two independent, verified runs showing an
+advisory rule and a soft gate failing the same way), **C for the gate's own numbers** (`minFiles`,
+`gateMaxDenials`), which are a judgement call, not a measurement. → Validation: `tests/gate.test.js`;
+indirectly, the project bench, since architect mode cannot run without the gate holding. → Status:
+shipped in `balanced` and `aggressive` (`architect.gate: true`).
+
+**H23. Subagent prefix diet through `tools:` allowlists.** Mechanism: every tool schema in a
+request's prefix costs tokens whether or not the agent ever calls it (section 1: 219k of 267k
+characters in one subagent request were tool schemas); an agent that declares only the tools it
+uses skips every other tool's schema. → xend implementation: every shipped agent (`xend-scout`,
+`xend-reader`, `xend-worker`, `xend-worker-lite`, `xend-reviewer`) declares `tools:` explicitly in
+its frontmatter. → Saving: proportional to how many tools and MCP servers the host session has
+configured; not separately measured for xend's own agents. → Quality: neutral (agents never needed
+the omitted tools). → **Grade C.** → Validation: none beyond the frontmatter itself; a bench arm
+comparing a `tools:`-restricted agent against an unrestricted one is not built. → Status: shipped.
+**Note on H17**: `omitClaudeMd: true` was also shipped on `xend-scout` and `xend-reader` to remove
+the memory-file prefix, but *(verified here, Claude Code 2.1.272)* plugin agents do not honour
+`omitClaudeMd`, `hooks`, `mcpServers` or `permissionMode` at all — the field is inert for a
+plugin-installed agent and is kept in the agent files only as a hint for a user- or project-level
+copy. `tools:` is the only prefix lever that actually reaches a plugin subagent.
+
 ## 4. Rejected or deferred
 
 | Idea | Why not (evidence) |
@@ -155,6 +224,9 @@ because the JetBrains number was measured on a different, longer task distributi
 | Route the main session through a third-party proxy or off-Anthropic backends | Breaks native prompt caching and changes the model; outside the quality bound by construction. |
 | Semantic response caching | Chat-style evidence only; stale-reuse risk on near-duplicate coding requests. |
 | Automatic `/compact` at low thresholds | Compaction is a paid summarization pass plus a cold cache; Anthropic recommends clearing rarely and in large batches. xend prefers checkpoint + `/clear` and, in `aggressive`, infrequent server-side clearing. |
+| A `SubagentStop` verdict delivered via `hookSpecificOutput.additionalContext` | Reaches the parent, but *(verified here)* the subagent itself keeps replying to it — nine extra stops observed before a cap. `decision: block` with a reason makes it restate once cleanly instead; xend uses only `decision: block`. |
+| A verifier living in `PostToolUse(Agent)` | The `Agent` tool is asynchronous in this build *(verified here, Claude Code 2.1.272)*: `PostToolUse(Agent)` fires at launch with `tool_response.status: "async_launched"` and no result to check. `SubagentStop` is the only hook that ever sees the subagent's final reply, so the verifier lives there instead. |
+| A soft `PreToolUse` gate that names its own escape hatch (`plan off`) | *(verified here)*: the model used exactly the exit it was told about and finished the task directly (11 turns, one denial, $0.18) instead of planning. See H22. The shipped gate never advertises a way to disable itself. |
 
 ## 5. What xend adds that did not exist as a package
 
@@ -166,8 +238,9 @@ because the JetBrains number was measured on a different, longer task distributi
 6. Honest range limiting for unranged reads of very large files (aggressive), through a PreToolUse `updatedInput`.
 7. A verify-or-escalate delegation contract for cheap-model subagents, shipped as agents plus a routing skill.
 8. A paired benchmark that reports its minimum detectable effect and merges evidence across runs, with a three-part promotion gate (quality, cost, turns) instead of a marketing percentage, and adversarial tasks built to catch the ways a condenser fails.
+9. Mechanical verification of subagent citations and worker claims in a `SubagentStop` hook: every `path:line` a subagent cites is checked against the real files and, for `xend-reader`, against the quoted text on that line; a worker's claimed test pass is re-run against an allowlisted command rather than trusted; a mismatch or bad citation is sent back once for restatement (`scripts/subagent-stop.js`, H21).
 
-Ideas from the adversarial review that are not built yet, in order of expected value: an audit line for each MCP server's schema cost; LSP (code-intelligence) plugin suggestions per repository language; mechanical verification of subagent citations in a `SubagentStop` hook (check that each `path:line` exists and contains the claimed symbol); structure-aware retrieval (expand a grep hit to its enclosing function; a token-budgeted repo map); a bench arm against Claude Code's built-in Concise output style; graded scoring and a position-swapped LLM judge for commit messages and docs, which the pass/fail bench cannot see.
+Ideas from the adversarial review that are not built yet, in order of expected value: an audit line for each MCP server's schema cost; LSP (code-intelligence) plugin suggestions per repository language; structure-aware retrieval (expand a grep hit to its enclosing function; a token-budgeted repo map); a bench arm against Claude Code's built-in Concise output style; graded scoring and a position-swapped LLM judge for commit messages and docs, which the pass/fail bench cannot see.
 
 ## 6. Measuring quality: the 3% question
 
@@ -199,6 +272,18 @@ power per run and are the next step for the suite.
 - Run r3 (same suite, one trial, prefix trimmed by ~40%, the shipped configuration): pass rate 95.2% to 90.5%, the difference being one adversarial task (`adv-middle-of-output`) that passed 1 of 3 times in each arm across r2 and r3; output tokens -8.6%; turns 4.8 to 4.5; total tokens +0.8%; uncached input +8.4%; cost +3.5% (95% CI -1.2% to +7.9%); gate: quality INCONCLUSIVE (MDE 11.8 points at n=21 x 1), cost INCONCLUSIVE, turns PASS. Merged r2 + r3 (63 paired runs, mixed configurations): pass +1.6 points (95% CI 0 to +4.8), output -5.5%, turns unchanged, cost +6.9%. Conclusion: on five-turn tasks the shipped plugin is cost-neutral to slightly negative and quality-neutral; its savings have to be shown on long and reading-heavy sessions, which this suite does not contain yet.
 - Run r4 (same suite, one trial, ponytail `full` with xend's adapted text, the shipped `balanced` default): pass rate 90.5% in both arms (the same two tasks fail on both sides); output tokens -4.9%; turns 4.3 to 4.5; total tokens +6.8%; cost +3.9% (95% CI -4.5% to +10.0%); gate INCONCLUSIVE on cost and turns. Against r3 (xend without ponytail: cost +3.5%) the adapted ruleset is indistinguishable on these micro-tasks, which write very little code to begin with; the JetBrains effect was measured on larger SkillsBench tasks. Run r5 (same suite, one trial, ponytail `full` with the upstream-verbatim text): pass rate 95.2% to 90.5% (the flaky adversarial task); output tokens +8.6%; turns 4.5 to 5.0; uncached input +20.9%; cost +16.7% (95% CI +10.6% to +24.0%); gate FAIL on cost. The three xend arms line up with prefix size: no ponytail $0.106, adapted $0.112, upstream $0.117 per task. Conclusion: ponytail's measured saving does not transfer to five-turn micro-tasks; the shipped default is the small adapted text in every profile and the upstream text is opt-in for long, code-heavy sessions, where the JetBrains result was obtained.
 - A benchmark bug worth recording: the runner passed a relative state directory, so hooks wrote their logs under the fixture copy and the "shaping activity" column read zero for every task. Every number above was still produced by real runs; the log was simply lost. Fixed by resolving the directory to an absolute path.
+- The `Agent` tool is asynchronous: `PostToolUse(Agent)` fires at launch with `tool_response.status = "async_launched"` and no result — a verifier cannot live there. `SubagentStop` input carries `agent_id`, `agent_type` (namespaced, e.g. `xend:xend-scout`), `agent_transcript_path`, `last_assistant_message`, `stop_hook_active`. With `--no-session-persistence` (the bench setting) the subagent transcript file named by `agent_transcript_path` does not exist at stop time; `last_assistant_message` is still delivered.
+- `SubagentStop` returning `{"decision":"block","reason":"..."}` makes the subagent continue with the reason as input and restate once cleanly, triggering `SubagentStop` again with `stop_hook_active: true`. Returning `hookSpecificOutput.additionalContext` instead reaches the parent as a system reminder but also makes the subagent keep replying to it — nine extra stops observed until a cap. xend uses only `decision: block` for verdicts.
+- Pilot run of architect mode (`bench/results/r6-pilot`, Sonnet at medium effort, `project-log-pipeline`): 58/58 hidden tests, 15 turns, $1.28, three `xend-worker` builders; the gate fired at the fourth file, the plan was written and dispatched. Two findings: (1) the planning model gave every task the whole test suite as its verify command, which cannot pass with one module present, so two builders honestly replied BLOCKED and the verifier ran the suite anyway (`plan set` now warns about this and the gate's reason says each task's verify must pass in isolation); (2) one verifier record lost its task id although the launch registry held it: the parent had called the Agent tool in foreground mode, and `PostToolUse(Agent)` then fires only after `SubagentStop`. Builders now start their reply with `Task: <id>`, which the verifier reads first.
+- Run r6 (`bench/results/r6-project-architect`; two greenfield project tasks with 60 and 58 hidden tests; arms solo Sonnet, plain xend on Sonnet, architect on Sonnet, solo Fable, architect on Fable; medium effort; architect arms plan from the first file): every arm 100% on the hidden tests. Cost per task: solo Sonnet $0.51, plain xend $0.48 (-5.0%, 95% CI -24.6% to +14.6%; turns 19.5 to 17.0; tokens -15.6%), architect on Sonnet $1.15 (+124.6%, CI +121.1% to +128.1%; turns 3.5; six Sonnet builders per task, all verified), solo Fable $1.61 (+214.8%), architect on Fable $2.69 (+426.3%; 24 turns: Fable moved to a new file after each gate refusal until the per-session cap lifted, wrote half the code itself, then delegated three modules to Haiku builders that passed for $0.05-0.06). One architect run wrote every task verify as `cd ... && pytest`, which the allowlist refused; the six tasks were recorded as done-unverified.
+- Run r7 (`bench/results/r7-architect-lite`; same two tasks; architects with Haiku builders forced): still 100% everywhere; architect on Sonnet $1.79 per task (+251.1%; Haiku builders needed many turns and verifier retries, $0.34-0.64 per task; the verifier caught and sent back one false PASS), architect on Fable $3.32 (+553.0%; 12 gate refusals on one task, 6 on the other, then the work done by Fable itself). The gate cap moved from per session to per file after this run, and the default builder tier became Haiku.
+- Run r7b (`bench/results/r7b-brownfield`; a soft-delete change across a generated 50-module, 1,292-line codebase, 56 hidden tests, 12 files to change): every arm 56/56. Solo Sonnet 36 turns $0.54; plain xend 34 turns $0.52 (-3.9%); architect on Sonnet 4 turns $1.08 (+98.9%; six builders, Haiku share $0.10); solo Fable 20 turns $1.27; architect on Fable 14 turns $1.77 (+39% over solo Fable; planned before editing anything, five Haiku builders did the work for $0.17, and the planner's 26k output tokens of briefs were about $1.30 of the total).
+- Conclusion across r6, r7 and r7b: plain xend against solo Sonnet was -24.6% (log pipeline, 15 turns instead of 21), -3.9% (brownfield, 34 instead of 36) and +14.6% (ledger CLI, 19 instead of 18), mean -4.6% over single trials, so cheaper on two of three long tasks with the mean carried by one task; that is weaker than a uniform saving but the first long-task result after five micro-task runs at +3% to +15%. The plain arm on this branch carries about 100 more prefix tokens than xend on main (new skill and agent descriptions, one reading clause), so it measures xend against no plugin, not new against old; architect mode was never cheaper (+99% to +128% against solo Sonnet with Sonnet builders on all three tasks, +249% to +254% with Haiku builders forced on the two greenfield tasks, +40% to +79% for a Fable planner against solo Fable) at equal quality, because builders' cold prefixes and the planner's brief output outweighed the reading it kept out of the main context. Architect mode is therefore opt-in in every profile.
+- Plugin agents do not honour `omitClaudeMd`, `hooks`, `mcpServers` or `permissionMode`; `tools:` allowlists do work and are the only prefix lever available to a plugin subagent (corrects H17; see H23).
+- Model aliases `haiku`, `sonnet`, `opus`, `fable` all resolve in headless mode.
+- Smoke test 1 (architect paragraph in the session block, no gate; a headless Sonnet session given a three-module package to implement): the model did the task itself — 10 turns, no plan, zero subagents, $0.28. The rule was read and ignored.
+- Smoke test 2 (a first, soft gate that refused the third direct edit once and named `plan off` as the way out): the model ran `plan off` and finished directly — 11 turns, one denial, $0.18. This is why the shipped gate (`docs/SPEC-architect.md` section 13, H22) never advertises an exit.
+- The session block measured with `node scripts/xend-cli.js context | wc -c` at `balanced`: 2,869 B / ~755 tokens with architect mode on (the default), 1,680 B / ~442 tokens with `XEND_ARCHITECT=0` — the architect paragraph costs about 1,189 B / ~313 tokens (see `docs/ARCHITECTURE.md`).
 
 ## 8. Sources
 
