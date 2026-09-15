@@ -38,7 +38,7 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
-    architect: { enabled: false, minFiles: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
+    architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
   },
   balanced: {
     profile: 'balanced',
@@ -69,7 +69,7 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
-    architect: { enabled: true, minFiles: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
+    architect: { enabled: true, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
   },
   aggressive: {
     profile: 'aggressive',
@@ -100,7 +100,7 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
-    architect: { enabled: true, minFiles: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
+    architect: { enabled: true, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
   },
 };
 
@@ -170,6 +170,7 @@ function envOverrides(env) {
   if (env.XEND_PONYTAIL_STRICT !== undefined) o.ponytailStrict = !/^(0|false|off)$/i.test(env.XEND_PONYTAIL_STRICT);
   if (env.XEND_CHECKPOINT !== undefined) o.checkpoint = !/^(0|false|off)$/i.test(env.XEND_CHECKPOINT);
   if (env.XEND_ARCHITECT !== undefined) o.architect = Object.assign({}, o.architect, { enabled: !/^(0|false|off)$/i.test(env.XEND_ARCHITECT) });
+  if (env.XEND_ARCHITECT_GATE !== undefined) o.architect = Object.assign({}, o.architect, { gate: !/^(0|false|off)$/i.test(env.XEND_ARCHITECT_GATE) });
   if (env.XEND_VERIFY !== undefined) o.architect = Object.assign({}, o.architect, { verify: !/^(0|false|off)$/i.test(env.XEND_VERIFY) });
   return o;
 }

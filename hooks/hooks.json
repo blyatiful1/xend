@@ -15,6 +15,12 @@
         "hooks": [
           { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-read.js\"", "timeout": 5 }
         ]
+      },
+      {
+        "matcher": "^(Write|Edit|MultiEdit)$",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-edit-gate.js\"", "timeout": 5 }
+        ]
       }
     ],
     "PostToolUse": [

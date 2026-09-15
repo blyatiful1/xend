@@ -12,9 +12,9 @@ Requested: `$ARGUMENTS` (empty means `status`). It must be one of `status`, `nex
 
   `node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" plan <status|next> --session "${CLAUDE_SESSION_ID}"`
 
-- **off** or **on**: run exactly:
+- **off** or **on**: run exactly, using the requested value:
 
-  `node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" set "${CLAUDE_SESSION_ID}" architect <off|on>`
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" plan <off|on> --session "${CLAUDE_SESSION_ID}"`
 
 Show that command's output verbatim, then continue.
 

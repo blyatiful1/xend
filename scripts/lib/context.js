@@ -26,10 +26,13 @@ const DEFAULT_CLI_PATH = path.join(__dirname, '..', 'xend-cli.js');
 
 // One paragraph, SPEC-architect.md section 4. Injected after DELEGATION when architect mode is
 // enabled; the CLI path is the only environment-specific string in it, so the block otherwise
-// stays free of per-turn variation.
-function architectText(cliPath) {
+// stays free of per-turn variation. `gate` (SPEC section 13) appends one sentence noting the
+// mechanical floor pre-edit-gate.js enforces; omit or pass false to leave it out.
+function architectText(cliPath, gate) {
   const p = cliPath || DEFAULT_CLI_PATH;
-  return 'Architect mode: for work touching 3+ files or needing 8+ tool calls, plan first, then let builders build; keep file contents out of your own context. 1) Locate with xend-scout; outline a file with node "' + p + '" outline <file>; read only the interfaces you must pin. 2) Write the plan: node "' + p + '" plan set <<\'EOF\' {json} EOF — tasks small, fully specified (files, spec, verify command, tier lite=Haiku for mechanical edits / worker=Sonnet otherwise, deps). 3) node "' + p + '" plan next prints ready briefs; dispatch each with one Agent call (subagent_type xend-worker-lite or xend-worker, prompt = the brief); put independent tasks in the same message. 4) xend re-runs every builder\'s verify command; a mismatch is flagged in the builder\'s own reply and in plan status. Trust those, not the claim. 5) Repeat plan next until empty; tasks it lists under "do yourself" are yours. 6) Run the project verify command; dispatch fix tasks for failures; then summarize. Below the size floor, work directly.';
+  let text = 'Architect mode: for work touching 3+ files or needing 8+ tool calls, plan first, then let builders build; keep file contents out of your own context. 1) Locate with xend-scout; outline a file with node "' + p + '" outline <file>; read only the interfaces you must pin. 2) Write the plan: node "' + p + '" plan set <<\'EOF\' {json} EOF — tasks small, fully specified (files, spec, verify command, tier lite=Haiku for mechanical edits / worker=Sonnet otherwise, deps). 3) node "' + p + '" plan next prints ready briefs; dispatch each with one Agent call (subagent_type xend-worker-lite or xend-worker, prompt = the brief); put independent tasks in the same message. 4) xend re-runs every builder\'s verify command; a mismatch is flagged in the builder\'s own reply and in plan status. Trust those, not the claim. 5) Repeat plan next until empty; tasks it lists under "do yourself" are yours. 6) Run the project verify command; dispatch fix tasks for failures; then summarize. Below the size floor, work directly.';
+  if (gate) text += ' xend refuses the third direct file edit without a plan, once.';
+  return text;
 }
 
 // LEAN/LEAN_LEVEL/LEAN_UPSTREAM/LEAN_BRIDGE: adapted from ponytail (MIT, Dietrich Gebert),
@@ -95,7 +98,7 @@ function build(cfg, opts) {
   if (cfg.shape && cfg.shape.enabled) parts.push(CONDENSED);
   for (const l of lean.parts) parts.push(l);
   if (cfg.delegation !== false) parts.push(DELEGATION);
-  if (archOn) parts.push(architectText(opts.cliPath));
+  if (archOn) parts.push(architectText(opts.cliPath, cfg.architect.gate !== false));
   if (opts.checkpoint) parts.push('Checkpoint from before the reset:\n' + opts.checkpoint.trim());
   return parts.join('\n\n');
 }

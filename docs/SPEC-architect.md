@@ -278,35 +278,38 @@ per-model cost split; `subagent_stats` recorded. The decision comparison for thi
 - Nothing in this layer changes the main session's model or effort.
 - Every claim of savings comes from `bench/results/` and is written down whether or not it is favourable.
 
-## 13. The gate (added after the first headless smoke test)
+## 13. The gate (added after the first headless smoke tests)
 
 *(verified)*: with the architect paragraph in the session block and `XEND_ARCHITECT=1`, a headless
 Sonnet session given a three-module package to implement did the whole task itself: 10 turns, no
 plan, zero subagents, $0.28. The rule was read and ignored, exactly as JetBrains found for on-demand
-skills. A behavioural rule with a strong prior against it ("just do the work") needs a mechanical
-floor, or the layer never runs and cannot be measured.
+skills. A first gate that refused the third direct edit once and named `plan off` as the way out was
+taken as an escape hatch: the model ran `plan off` and finished directly (11 turns, $0.18). A
+behavioural rule with a strong prior against it ("just do the work") needs a mechanical floor with no
+advertised exit, or the layer never runs and cannot be measured. Whether the layer is worth its cost
+is then a question for the project bench, not for the model's in-the-moment judgement.
 
 `scripts/pre-edit-gate.js`, registered under `PreToolUse` with matcher `^(Write|Edit|MultiEdit)$`
-(timeout 5). Config `architect.gate: true` in every profile where architect is enabled; env
-`XEND_ARCHITECT_GATE=0` disables it. Behaviour, all conditions required before it acts:
+(timeout 5). Config `architect.gate: true`, `architect.minFiles: 4`, `architect.gateMaxDenials: 3` in
+every profile; env `XEND_ARCHITECT_GATE=0` disables the gate. It denies a direct `Write`/`Edit`/
+`MultiEdit` of a file when all of these hold:
 
 1. architect enabled for the session (config and session override), gate enabled, not inside a
    subagent (`agent_id` present or `/subagents/` in the transcript path → exit).
 2. no `plan.json` in the session state (a plan means the architect is doing a `self` task or a fix).
-3. the gate has not fired yet this session (`<state>/gate.json`); it fires **at most once per session**,
-   so the turn tax is bounded at one.
-4. the file being written is not already in `<state>/edits.jsonl`, and the number of distinct files
-   already there is at least `architect.minFiles - 1` (default 2): this call would be the third
-   distinct file edited directly.
+3. the file is not already in `<state>/edits.jsonl` and the number of distinct files there is at
+   least `minFiles - 1`: this call would be the fourth distinct file edited directly.
+4. fewer than `gateMaxDenials` denials so far this session (`<state>/gate.json`: `{ denials, files }`),
+   so the turn tax is bounded at three turns per session and a plan lifts it entirely.
 
-When all hold it writes `gate.json` and returns
-`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"<reason>"}}`
-with the reason (one paragraph): `xend architect mode: this would be the 3rd file you edit directly, which is above the floor. Plan the remaining work instead: node "<cliPath>" plan set <<'EOF' {goal, verify, tasks:[{id, title, tier, files, testFiles, deps, spec, verify}]} EOF, then node "<cliPath>" plan next and dispatch each brief with one Agent call (subagent_type xend-worker-lite or xend-worker). To keep editing directly, run node "<cliPath>" plan off and retry. This notice appears once.`
+It returns `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
+"permissionDecisionReason":"<reason>"}}`. The reason is one paragraph that says this is above the
+floor, tells the model to stop editing and plan the remaining work, gives the exact `plan set` JSON
+shape and the `plan next` / Agent dispatch steps, and says files already written stay as they are. It
+never mentions a way to disable the gate. `/xend:plan off` (the CLI's `plan off`) remains the user's
+switch; the session block's architect paragraph ends with `Above three files edited directly, xend
+refuses further direct edits until a plan exists.`
 
-The CLI gains `plan off` and `plan on` (session override `architect` false/true, resolved through the
-usual session lookup) so the way out never needs a session id. The session block's architect
-paragraph ends with: `xend refuses the third direct file edit without a plan, once.`
-
-Tests (`tests/gate.test.js`): fires only on the third distinct file, never twice, never with a plan
-present, never inside a subagent, never when disabled; the deny JSON shape; `plan off` clears the
-way. Measured effect: the smoke test above re-run after the gate.
+Tests (`tests/gate.test.js`): fires only from the fourth distinct file, repeats on retry up to three
+denials then allows, never with a plan present, never inside a subagent, never when disabled; the deny
+JSON shape; the reason carries no `plan off`; `plan off` via the CLI clears the way.

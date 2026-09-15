@@ -17,6 +17,8 @@
 //       done <id> PASS|FAIL [note]   record a manual verdict
 //       reset <id>        back to todo (attempts kept)
 //       show              print the raw plan JSON
+//       off               turn architect mode off for this session (session override)
+//       on                turn architect mode back on for this session
 const fs = require('fs');
 const path = require('path');
 const config = require('./lib/config.js');
@@ -189,8 +191,19 @@ function planCommand(sub, args, cwd) {
       console.log(JSON.stringify(p, null, 2));
       return;
     }
+    case 'off': {
+      state.setSessionOverride(dir, 'architect', false);
+      try { fs.unlinkSync(path.join(dir, 'gate.json')); } catch (_) {}
+      console.log('architect mode off for this session; direct edits allowed');
+      return;
+    }
+    case 'on': {
+      state.setSessionOverride(dir, 'architect', true);
+      console.log('architect mode on for this session');
+      return;
+    }
     default:
-      console.log('usage: xend-cli.js plan set|status|next|brief|done|reset|show');
+      console.log('usage: xend-cli.js plan set|status|next|brief|done|reset|show|off|on');
       process.exitCode = 1;
   }
 }

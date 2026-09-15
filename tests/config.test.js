@@ -51,7 +51,7 @@ test('context block is stable and contains no timestamps', () => {
     'xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + (archOn ? ', architect' : '') + ').',
     context.TERSE[cfg.terse], context.TERSE_EXEMPTIONS, context.READING, context.CONDENSED, context.DELEGATION,
   ];
-  if (archOn) preIntegrationParts.push(context.architectText());
+  if (archOn) preIntegrationParts.push(context.architectText(undefined, cfg.architect.gate !== false));
   const preIntegration = preIntegrationParts.join('\n\n');
   assert.strictEqual(a, preIntegration, 'ponytail integration changed the base block');
   const offOpts = { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: 'adapted', strict: false } };
