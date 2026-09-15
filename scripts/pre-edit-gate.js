@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
 // PreToolUse (Write|Edit|MultiEdit): xend architect gate (docs/SPEC-architect.md section 13).
-// In architect-enabled sessions, without a plan and before the gate has fired once this session,
-// deny the third distinct direct file edit so "just do the work" does not silently skip planning.
-// Never blocks: architect/gate disabled, a plan already exists, already fired once, inside a
-// subagent, editing a file already touched this session, or still under the floor.
+// In architect-enabled sessions, above the file floor and without a plan, deny a direct edit of a
+// not-yet-edited file, up to gateMaxDenials times per session; once a plan exists nothing is
+// denied. Never blocks: architect/gate disabled, a plan already exists, the file is already in
+// edits.jsonl, still under the floor, the denial ceiling is reached, or inside a subagent.
 const fs = require('fs');
 const path = require('path');
 const io = require('./lib/io.js');
@@ -46,22 +46,36 @@ function main() {
   // condition 2: a plan means the architect is already doing a self task or a fix
   if (fs.existsSync(path.join(dir, 'plan.json'))) return;
 
-  // condition 3: fires at most once per session
-  if (fs.existsSync(path.join(dir, 'gate.json'))) return;
-
-  // condition 4: this call must be the third distinct file edited directly
+  // condition 3: the file is not already in edits.jsonl, and the distinct-file count there is at
+  // least minFiles - 1: this call would be the minFiles-th (default 4th) distinct file edited
+  // directly.
   const target = path.resolve(filePath);
   const seen = distinctEditedFiles(dir);
   if (seen.has(target)) return;
-  const minFiles = arch.minFiles || 3;
+  const minFiles = arch.minFiles || 4;
   if (seen.size < minFiles - 1) return;
 
-  state.writeJson(path.join(dir, 'gate.json'), { fired: true, file: target });
+  // condition 4: fewer than gateMaxDenials denials so far this session -- a stubborn retry is
+  // denied again, bounded, and a plan lifts the gate entirely.
+  const gateState = state.readJson(path.join(dir, 'gate.json'), null) || { denials: 0, files: [] };
+  const maxDenials = arch.gateMaxDenials || 3;
+  if ((gateState.denials || 0) >= maxDenials) return;
+
+  state.writeJson(path.join(dir, 'gate.json'), {
+    denials: (gateState.denials || 0) + 1,
+    files: (gateState.files || []).concat([target]),
+  });
+
   const cliPath = path.join(__dirname, 'xend-cli.js');
-  const reason = 'xend architect mode: this would be the 3rd file you edit directly, which is above the floor. ' +
-    'Plan the remaining work instead: node "' + cliPath + '" plan set <<\'EOF\' {goal, verify, tasks:[{id, title, tier, files, testFiles, deps, spec, verify}]} EOF, ' +
-    'then node "' + cliPath + '" plan next and dispatch each brief with one Agent call (subagent_type xend-worker-lite or xend-worker). ' +
-    'To keep editing directly, run node "' + cliPath + '" plan off and retry. This notice appears once.';
+  const reason = 'xend architect mode: this would be the 4th file you edit directly, which is above the floor. ' +
+    'Do not keep editing; plan the remaining work and let builders do it. ' +
+    'Step 1: node "' + cliPath + '" plan set <<\'EOF\' followed by JSON {"goal": "...", "verify": "<project test command>", ' +
+    '"tasks": [{"id": "T1", "title": "...", "tier": "lite|worker", "files": ["..."], "testFiles": ["..."], "deps": [], ' +
+    '"spec": "<exact interface and behaviour>", "verify": "<command for this task>"}]} then EOF. ' +
+    'Step 2: node "' + cliPath + '" plan next prints one brief per ready task; dispatch each brief with one Agent call ' +
+    '(subagent_type xend-worker-lite for lite, xend-worker for worker; prompt = the brief), independent tasks in the same message. ' +
+    'Step 3: repeat plan next until it reports the plan complete, then run the project verify command. ' +
+    'Files you already wrote stay as they are.';
   io.writeHookOutput({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',

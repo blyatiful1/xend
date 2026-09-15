@@ -259,7 +259,8 @@ test('config: architect profile defaults (lite off, balanced/aggressive on)', ()
   assert.strictEqual(balanced.architect.enabled, true);
   const aggressive = config.resolve({ env: { XEND_PROFILE: 'aggressive' }, cwd: os.tmpdir() });
   assert.strictEqual(aggressive.architect.enabled, true);
-  assert.strictEqual(balanced.architect.minFiles, 3);
+  assert.strictEqual(balanced.architect.minFiles, 4);
+  assert.strictEqual(balanced.architect.gateMaxDenials, 3);
   assert.strictEqual(balanced.architect.minToolCalls, 8);
   assert.strictEqual(balanced.architect.verify, true);
   assert.strictEqual(balanced.architect.verifyTimeoutMs, 120000);
@@ -286,7 +287,7 @@ test('config: a non-object architect override (e.g. `false`) normalizes to disab
   fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({ architect: false }));
   const cfg = config.resolve({ env: {}, cwd: dir });
   assert.strictEqual(cfg.architect.enabled, false);
-  assert.strictEqual(cfg.architect.minFiles, 3); // rest of the shape survives
+  assert.strictEqual(cfg.architect.minFiles, 4); // rest of the shape survives
 });
 
 // --- context: the architect paragraph ------------------------------------------
