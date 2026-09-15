@@ -239,19 +239,27 @@ model. Steps:
    `Delegation` section (subagent runs, verified pass, mismatches caught, unverifiable, malformed,
    citations checked/bad, scope warnings).
 
-### Launch registry (`scripts/agent-launch.js`)
+### Task id: reply line, launch registry, transcript (`scripts/agent-launch.js`)
 
 The `Agent` tool is asynchronous *(verified here, Claude Code 2.1.272)*: `PostToolUse(Agent)` fires
 at launch with `tool_response.status: "async_launched"` and no result, so a verifier cannot live
-there. It is, however, the only point that ever sees a subagent's launch-time prompt and its new
-`agentId` together, so `scripts/agent-launch.js` records `{ agentId: { taskId, subagentType,
-prompt (first 400 chars), toolUseId } }` in `<state>/agents.json` (capped at 200 entries), reading
-the task id out of the same `[xend task <id>]` tag the brief carries. `SubagentStop` looks the
-`agent_id` it receives up in this registry first. This matters because with
-`--no-session-persistence` (the bench setting) the subagent's own transcript file named by
-`agent_transcript_path` does **not** exist at stop time *(verified here)* — `last_assistant_message`
-still arrives, but nothing else does — so without the registry the verifier would lose the task id
-on every bench run and could not close the loop back into `plan.json`.
+there. With `--no-session-persistence` (the bench setting) the subagent's own transcript file named
+by `agent_transcript_path` does **not** exist at stop time either *(verified here)*; only
+`last_assistant_message` arrives. The verifier therefore resolves the plan task id through three
+channels, in order:
+
+1. a `Task: <id>` line at the top of the builder's reply. The brief asks for it, and it is the
+   reliable channel: the pilot run *(verified here)* showed that when the parent calls the Agent tool
+   in foreground mode, `PostToolUse(Agent)` fires only after the subagent has finished, i.e. after
+   `SubagentStop`, so anything written at launch time is not there yet;
+2. the launch registry: `scripts/agent-launch.js` (PostToolUse, `^Agent$`) records
+   `{ agentId: { taskId, subagentType, prompt (first 400 chars), toolUseId } }` in `<state>/agents.json`
+   (capped at 200 entries) from the `[xend task <id>]` tag the brief carries; the verifier retries the
+   lookup three times, 200 ms apart, for background launches that land late;
+3. the agent transcript's first user message, when that file exists (interactive sessions).
+
+Each `verify.jsonl` record names the channel that worked (`lookup`). Without the id the verdict is
+still recorded, but the plan cannot advance.
 
 ### The gate (`scripts/pre-edit-gate.js`)
 

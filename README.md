@@ -92,7 +92,7 @@ Whether the extra machinery pays for itself is a question for the project bench 
 
 <!-- R6 -->
 
-On tasks below the size floor (fewer than 3 files, fewer than 8 tool calls) the layer is off by construction: the model works directly, exactly as without it.
+On tasks below the size floor (three files or fewer, fewer than 8 tool calls) the layer is off by construction: the model works directly, exactly as without it.
 
 ## Quality guarantees
 

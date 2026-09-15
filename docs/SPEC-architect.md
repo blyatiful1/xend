@@ -203,13 +203,16 @@ internal error it prints nothing. Steps:
 2. `kind` from `agent_type` with the `xend:` prefix stripped: `xend-scout`, `xend-reader`, `xend-reviewer`
    → citation check; `xend-worker`, `xend-worker-lite` → verification check; any other agent → only if
    its transcript's first user message contains `[xend task <id>]` (then treat as a worker); else return.
-3. Task id: `scripts/agent-launch.js` (PostToolUse, matcher `^Agent$`) records every launch in
-   `<state>/agents.json` as `{ "<agentId>": { taskId, subagentType, prompt (first 400 chars), toolUseId } }`
-   where `taskId` is the first `\[xend task ([\w-]+)\]` in `tool_input.prompt` (null when absent);
-   the file is capped at the 200 most recent entries. The verifier looks `agent_id` up there; when the
-   entry is missing it falls back to the agent transcript's first user message if that file exists.
-   Load `plan.json`; the plan task's `verify` command is the contract and wins over the builder's stated
-   command.
+3. Task id, in this order: (a) a `Task: <id>` line at the top of the builder's reply (the brief asks
+   for it; this is the reliable channel); (b) the launch registry `<state>/agents.json`, written by
+   `scripts/agent-launch.js` (PostToolUse, matcher `^Agent$`) as `{ "<agentId>": { taskId,
+   subagentType, prompt (first 400 chars), toolUseId } }` from the first `\[xend task ([\w-]+)\]` in
+   `tool_input.prompt`, capped at the 200 most recent entries, looked up with three 200 ms retries;
+   (c) the agent transcript's first user message when that file exists. *(verified in the pilot run)*:
+   when the parent calls the Agent tool in foreground mode, PostToolUse(Agent) fires only after the
+   subagent completes, i.e. after SubagentStop, so the registry alone loses the id; the reply line
+   does not. The record notes which channel worked (`lookup`). Load `plan.json`; the plan task's
+   `verify` command is the contract and wins over the builder's stated command.
 4. Citation check: every `path:LINE` or `path:START-END` token in `last_assistant_message` whose path
    exists relative to `cwd` (or absolute) must have `LINE`/`END` ≤ the file's line count; a path that does
    not exist at all is a bad citation. For reader evidence lines `- <file>:<line>: <text>`, the quoted text
