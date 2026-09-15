@@ -369,13 +369,13 @@ test('writeSessionPointers never throws even with a bad state dir', () => {
 
 // --- config: XEND_ARCHITECT / XEND_VERIFY and profile defaults ----------------
 
-test('config: architect profile defaults (lite off, balanced/aggressive on)', () => {
+test('config: architect.enabled is false in every profile (opt-in since bench r6/r7)', () => {
   const lite = config.resolve({ env: { XEND_PROFILE: 'lite' }, cwd: os.tmpdir() });
   assert.strictEqual(lite.architect.enabled, false);
   const balanced = config.resolve({ env: {}, cwd: os.tmpdir() });
-  assert.strictEqual(balanced.architect.enabled, true);
+  assert.strictEqual(balanced.architect.enabled, false);
   const aggressive = config.resolve({ env: { XEND_PROFILE: 'aggressive' }, cwd: os.tmpdir() });
-  assert.strictEqual(aggressive.architect.enabled, true);
+  assert.strictEqual(aggressive.architect.enabled, false);
   assert.strictEqual(balanced.architect.minFiles, 4);
   assert.strictEqual(balanced.architect.gateMaxDenials, 3);
   assert.strictEqual(balanced.architect.minToolCalls, 8);
@@ -384,19 +384,25 @@ test('config: architect profile defaults (lite off, balanced/aggressive on)', ()
   assert.strictEqual(balanced.architect.blockOnMismatch, true);
 });
 
-test('config: XEND_ARCHITECT=0 disables regardless of profile', () => {
+test('config: XEND_ARCHITECT=1 opts in regardless of profile; XEND_ARCHITECT=0 stays off', () => {
   const off = config.resolve({ env: { XEND_ARCHITECT: '0' }, cwd: os.tmpdir() });
   assert.strictEqual(off.architect.enabled, false);
   const offWord = config.resolve({ env: { XEND_ARCHITECT: 'off' }, cwd: os.tmpdir() });
   assert.strictEqual(offWord.architect.enabled, false);
   const on = config.resolve({ env: { XEND_ARCHITECT: '1', XEND_PROFILE: 'lite' }, cwd: os.tmpdir() });
   assert.strictEqual(on.architect.enabled, true);
+  const onBalanced = config.resolve({ env: { XEND_ARCHITECT: '1' }, cwd: os.tmpdir() });
+  assert.strictEqual(onBalanced.architect.enabled, true);
 });
 
 test('config: XEND_VERIFY=0 disables the verifier without touching enabled', () => {
-  const cfg = config.resolve({ env: { XEND_VERIFY: '0' }, cwd: os.tmpdir() });
+  const cfg = config.resolve({ env: { XEND_VERIFY: '0', XEND_ARCHITECT: '1' }, cwd: os.tmpdir() });
   assert.strictEqual(cfg.architect.verify, false);
-  assert.strictEqual(cfg.architect.enabled, true); // balanced default untouched
+  assert.strictEqual(cfg.architect.enabled, true); // explicitly opted in above; verify:0 does not touch it
+
+  const cfgDefault = config.resolve({ env: { XEND_VERIFY: '0' }, cwd: os.tmpdir() });
+  assert.strictEqual(cfgDefault.architect.verify, false);
+  assert.strictEqual(cfgDefault.architect.enabled, false); // balanced default: opt-in, untouched by XEND_VERIFY
 });
 
 test('config: a non-object architect override (e.g. `false`) normalizes to disabled', () => {
@@ -410,13 +416,13 @@ test('config: a non-object architect override (e.g. `false`) normalizes to disab
 // --- context: the architect paragraph ------------------------------------------
 
 test('context.build: architect paragraph only when enabled, includes the cliPath', () => {
-  const cfg = config.resolve({ env: {}, cwd: os.tmpdir() }); // balanced: architect on
-  const on = context.build(cfg, { cliPath: '/abs/path/to/xend-cli.js' });
+  const cfg = config.resolve({ env: {}, cwd: os.tmpdir() }); // balanced: architect off (opt-in)
+  const off = context.build(cfg, { cliPath: '/abs/path/to/xend-cli.js' });
+  assert.ok(!off.includes('Architect mode:'));
+  assert.ok(!off.includes(', architect)'));
+
+  const on = context.build(Object.assign({}, cfg, { architect: Object.assign({}, cfg.architect, { enabled: true }) }), { cliPath: '/abs/path/to/xend-cli.js' });
   assert.ok(on.includes('Architect mode:'));
   assert.ok(on.includes('/abs/path/to/xend-cli.js'));
   assert.ok(on.includes(', architect)'));
-
-  const off = context.build(Object.assign({}, cfg, { architect: { enabled: false } }), { cliPath: '/abs/path/to/xend-cli.js' });
-  assert.ok(!off.includes('Architect mode:'));
-  assert.ok(!off.includes(', architect)'));
 });

@@ -37,14 +37,16 @@ function writeEdits(dir, files) {
 }
 
 // Sets up a session state dir with a cached config.json (architect resolved with configEnv) and
-// an optional edits.jsonl. Returns { cwd, stateBase, dir, sessionId }.
+// an optional edits.jsonl. Returns { cwd, stateBase, dir, sessionId }. Architect defaults to off
+// since bench r6/r7 (opt-in); this suite tests the gate's own behavior, so it opts architect in by
+// default here unless the caller's configEnv says otherwise.
 function setupSession(sessionId, opts) {
   opts = opts || {};
   const cwd = mkTmpDir('xend-gate-cwd-');
   const stateBase = mkTmpDir('xend-gate-state-');
   const dir = stateDirFor(stateBase, sessionId);
   fs.mkdirSync(dir, { recursive: true });
-  const cfg = config.resolve({ env: opts.configEnv || {}, cwd });
+  const cfg = config.resolve({ env: opts.configEnv || { XEND_ARCHITECT: '1' }, cwd });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg));
   if (opts.edits) writeEdits(dir, opts.edits);
   return { cwd, stateBase, dir, sessionId };
@@ -226,7 +228,7 @@ test('(g) session override architect=false ("disabled"): no output', () => {
 test('(h) XEND_ARCHITECT_GATE=0 baked into the cached config ("disabled"): no output', () => {
   const { cwd, stateBase, sessionId, dir } = setupSession('sess-h', {
     edits: THREE_PRIOR,
-    configEnv: { XEND_ARCHITECT_GATE: '0' },
+    configEnv: { XEND_ARCHITECT: '1', XEND_ARCHITECT_GATE: '0' },
   });
   const cached = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
   assert.strictEqual(cached.architect.enabled, true); // architect itself stays on
@@ -277,7 +279,8 @@ test('`plan on` clears the session override so the gate can fire again (fresh de
 // --- context.build: the gate sentence --------------------------------------------------------
 
 test('context.build includes the gate sentence when architect.gate !== false, omits it when false', () => {
-  const cfg = config.resolve({ env: {}, cwd: os.tmpdir() }); // balanced: architect enabled, gate true
+  const base = config.resolve({ env: {}, cwd: os.tmpdir() }); // balanced default: architect off (opt-in)
+  const cfg = Object.assign({}, base, { architect: Object.assign({}, base.architect, { enabled: true }) }); // gate true
   const on = context.build(cfg, { cliPath: '/abs/path/to/xend-cli.js' });
   assert.ok(on.includes('Above three files edited directly, xend refuses further direct edits until a plan exists.'), on);
 

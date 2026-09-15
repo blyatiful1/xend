@@ -42,7 +42,7 @@ no database, and no dependency beyond Node.js 18+.
 | L4 Keep context lean | Checkpoints around `/clear` and compaction; reading discipline | PreCompact hook, SessionStart(`compact|clear`), `/xend:checkpoint` | balanced |
 | L5 Native levers | Effort, auto-compact window, bash output cap, prompt-cache TTL, tool search, MCP output cap | `/xend:setup <profile>` writes `settings.json` keys (with backup) | opt-in |
 | L6 Server-side masking | Anthropic context editing (`clear_tool_uses`) enabled through `CLAUDE_CODE_EXTRA_BODY` | settings `env` written by `/xend:setup` | aggressive (experimental; strongest external evidence, but each pass re-caches the remaining context) |
-| L7 Plan, then build | Keep file contents out of the main model's context entirely: it plans, disposable Haiku/Sonnet subagents read and write, a deterministic hook verifies their claims before the plan advances | SessionStart block (architect paragraph), PreToolUse gate (`pre-edit-gate.js`), PostToolUse(Agent) launch registry (`agent-launch.js`), SubagentStop verifier (`subagent-stop.js`), `xend-cli.js plan` | balanced, aggressive |
+| L7 Plan, then build | Keep file contents out of the main model's context entirely: it plans, disposable Haiku/Sonnet subagents read and write, a deterministic hook verifies their claims before the plan advances | SessionStart block (architect paragraph), PreToolUse gate (`pre-edit-gate.js`), PostToolUse(Agent) launch registry (`agent-launch.js`), SubagentStop verifier (`subagent-stop.js`), `xend-cli.js plan` | opt-in in every profile (bench r6/r7: not cheaper on greenfield project tasks) |
 
 ## Profiles
 
@@ -90,15 +90,19 @@ One stable block (no timestamps, no per-turn re-injection so the prompt cache st
 agent descriptions the plugin's fixed prefix was about **1,033 tokens, roughly 3.2%** of a typical
 32,000-token prefix; the benchmark showed that even the smaller prefix is not amortized on
 five-turn tasks (~0.8% cost per 100 tokens), which is why the cheap adapted text is the default on
-`lite` and `balanced`. Architect mode adds a ninth skill (`/xend:plan`) and a fifth agent
-(`xend-worker-lite`), and (default on in `balanced`/`aggressive`) one more paragraph to the block
-itself: measured with `node scripts/xend-cli.js context | wc -c` *(measured here)*, the block is
-**2,869 B / ~755 tokens** at `balanced` with architect enabled against **1,680 B / ~442 tokens**
-with `XEND_ARCHITECT=0` — the architect paragraph costs about **1,189 B / ~313 tokens** (this
+`lite` and `balanced`. Architect mode is **opt-in in every profile** (bench r6/r7 found it never
+cheaper on greenfield project tasks — see "Architect mode (L7)" below): turning it on
+(`XEND_ARCHITECT=1`, `.xend.json` `{"architect":{"enabled":true}}`, or `/xend:plan on`) adds a ninth
+skill (`/xend:plan`), a fifth agent (`xend-worker-lite`), and one more paragraph to the session
+block itself — that paragraph is present only when architect mode is on. Measured with `node
+scripts/xend-cli.js context | wc -c` *(measured here)*: the default `balanced` block, architect
+off, is **1,680 B / ~442 tokens**; the same block with architect enabled (`XEND_ARCHITECT=1`) is
+**2,869 B / ~755 tokens** — the architect paragraph costs about **1,189 B / ~313 tokens** (this
 command renders the block without the lean-rules detection pass, so its totals are not directly
-comparable to the 2,578 B figure above, which includes the adapted lean text). Whether that ~313
-extra tokens per session, plus each builder's own cold prefix, pays for itself is exactly what the
-project bench is for (see "Architect mode (L7)" below); it is not assumed. Contents:
+comparable to the 2,578 B figure above, which includes the adapted lean text). That ~313 extra
+tokens per session, plus each builder's own cold prefix, is exactly why the layer defaults off:
+`bench/results/` r6 and r7 measured it costing more, never less, on every greenfield project-task
+configuration tried. Contents:
 - terse rules for the active level and their exemptions (security warnings, ordered instructions,
   anything persisted outside chat stays in full prose),
 - reading discipline (grep before read, ranged reads, no re-reads of unchanged files, delegate
@@ -107,8 +111,8 @@ project bench is for (see "Architect mode (L7)" below); it is not assumed. Conte
   re-run a command to see more),
 - the lean build rules (the ladder, root-cause bug fixes, no unrequested abstraction), placed after
   the reading rules so "trace the flow under the reading rule above" resolves to text already seen,
-- (`balanced`, `aggressive`) the architect paragraph: when to plan, how to write and dispatch a
-  plan, and to trust xend's own re-run of a builder's verify command over its claim.
+- only when architect mode is on: the architect paragraph — when to plan, how to write and
+  dispatch a plan, and to trust xend's own re-run of a builder's verify command over its claim.
 
 `vendor/ponytail/` costs **zero** tokens: Claude Code scans only `skills/` for model-invocable
 skills, so the byte-identical vendored ruleset sits outside the skill index and is read only when

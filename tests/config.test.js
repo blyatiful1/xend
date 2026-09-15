@@ -25,9 +25,10 @@ test('profile defaults and env overrides', () => {
 test('XEND_ARCHITECT_MIN_FILES overrides architect.minFiles; invalid values are ignored', () => {
   const one = config.resolve({ env: { XEND_ARCHITECT_MIN_FILES: '1' }, cwd: os.tmpdir() });
   assert.strictEqual(one.architect.minFiles, 1);
-  const five = config.resolve({ env: { XEND_ARCHITECT_MIN_FILES: '5' }, cwd: os.tmpdir() });
+  const five = config.resolve({ env: { XEND_ARCHITECT_MIN_FILES: '5', XEND_ARCHITECT: '1' }, cwd: os.tmpdir() });
   assert.strictEqual(five.architect.minFiles, 5);
-  // rest of the architect shape survives the override
+  // rest of the architect shape survives the override (explicitly enabled here: architect is
+  // opt-in by default since bench r6/r7)
   assert.strictEqual(five.architect.enabled, true);
 
   const base = config.resolve({ env: {}, cwd: os.tmpdir() }).architect.minFiles; // balanced default: 4
@@ -78,8 +79,10 @@ test('context block is stable and contains no timestamps', () => {
 
   // Prefix regression guard: with no opts.ponytail the block is byte-identical to the
   // pre-integration composition, so every existing caller and test is unaffected. The default
-  // (balanced) profile has architect enabled, so that paragraph and header suffix are expected.
+  // (balanced) profile now has architect off (opt-in after bench r6/r7), so no paragraph or
+  // header suffix is expected here; a second assertion below checks the block with it enabled.
   const archOn = cfg.architect && cfg.architect.enabled;
+  assert.strictEqual(archOn, false, 'balanced default: architect is opt-in');
   const preIntegrationParts = [
     'xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + (archOn ? ', architect' : '') + ').',
     context.TERSE[cfg.terse], context.TERSE_EXEMPTIONS, context.READING, context.CONDENSED, context.DELEGATION,
@@ -89,6 +92,16 @@ test('context block is stable and contains no timestamps', () => {
   assert.strictEqual(a, preIntegration, 'ponytail integration changed the base block');
   const offOpts = { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: 'adapted', strict: false } };
   assert.strictEqual(context.build(Object.assign({}, cfg, { ponytail: 'off' }), offOpts), preIntegration);
+
+  // Same guard with architect explicitly enabled: the paragraph and header suffix appear.
+  const cfgArchOn = Object.assign({}, cfg, { architect: Object.assign({}, cfg.architect, { enabled: true }) });
+  const aOn = context.build(cfgArchOn, {});
+  const preIntegrationOnParts = [
+    'xend active (profile ' + cfgArchOn.profile + ', terse ' + cfgArchOn.terse + ', architect' + ').',
+    context.TERSE[cfgArchOn.terse], context.TERSE_EXEMPTIONS, context.READING, context.CONDENSED, context.DELEGATION,
+    context.architectText(undefined, cfgArchOn.architect.gate !== false),
+  ];
+  assert.strictEqual(aOn, preIntegrationOnParts.join('\n\n'), 'architect-enabled block regressed');
 
   // Three variant-aware ceilings. One number for all three would stop guarding anything:
   // the upstream-verbatim text is ~2.7x the adapted one and would swallow any regression.

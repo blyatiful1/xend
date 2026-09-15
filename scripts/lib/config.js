@@ -38,6 +38,7 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
+    // plan-then-build: opt-in (XEND_ARCHITECT=1, .xend.json {"architect":{"enabled":true}}, or /xend:plan on); bench r6/r7 measured +125% to +250% cost on greenfield project tasks
     architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
   balanced: {
@@ -69,7 +70,8 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
-    architect: { enabled: true, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
+    // plan-then-build: opt-in (XEND_ARCHITECT=1, .xend.json {"architect":{"enabled":true}}, or /xend:plan on); bench r6/r7 measured +125% to +250% cost on greenfield project tasks
+    architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
   aggressive: {
     profile: 'aggressive',
@@ -100,7 +102,8 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
-    architect: { enabled: true, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
+    // plan-then-build: opt-in (XEND_ARCHITECT=1, .xend.json {"architect":{"enabled":true}}, or /xend:plan on); bench r6/r7 measured +125% to +250% cost on greenfield project tasks
+    architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
 };
 

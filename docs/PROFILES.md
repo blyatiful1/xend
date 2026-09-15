@@ -35,7 +35,7 @@ Any layer may set `"profile"` and override individual keys. Example `.xend.json`
 | `delegation` (subagents advertised in the session block) | on | on | on |
 | `checkpoint` (PreCompact checkpoint, re-injected on compact/clear) | on | on | on |
 | `contextEditing` (server-side clearing of old tool results via `CLAUDE_CODE_EXTRA_BODY`) | off | off | on: trigger 110k input tokens, keep 12 tool uses, clear at least 40k |
-| `architect.enabled` (plan-then-build: the main model plans, cheap subagents build in disposable contexts; `docs/ARCHITECTURE.md` L7) | false | true | true |
+| `architect.enabled` (plan-then-build: the main model plans, cheap subagents build in disposable contexts) (opt-in: XEND_ARCHITECT=1, .xend.json, or /xend:plan on; docs/ARCHITECTURE.md L7) | false | false | false |
 | `architect.minFiles` / `architect.minToolCalls` (guidance floor named in the session block; `minFiles` also sets the gate's file threshold) | 4 / 8 | 4 / 8 | 4 / 8 |
 | `architect.verify` (`SubagentStop` re-runs each builder's own verify command instead of trusting its claim) | true | true | true |
 | `architect.verifyTimeoutMs` | 120000 | 120000 | 120000 |
