@@ -3,7 +3,8 @@
 // Paired A/B benchmark runner: the same tasks under a baseline Claude Code and under xend.
 //   node bench/run.js [--arms baseline,xend] [--runs 1] [--model sonnet] [--effort low]
 //                     [--tasks a,b|glob] [--category bugfix] [--concurrency 2] [--max-budget-usd 2]
-//                     [--profile balanced] [--out bench/results/<ts>] [--keep] [--dry-run] [--list]
+//                     [--profile balanced] [--ponytail off|lite|full|ultra] [--ponytail-text adapted|upstream]
+//                     [--ponytail-strict] [--out bench/results/<ts>] [--keep] [--dry-run] [--list]
 // Each run is a `claude -p` child. Results append to <out>/runs.jsonl; raw JSON per run in <out>/raw/.
 const fs = require('fs');
 const os = require('os');
@@ -15,7 +16,7 @@ const TASKS_DIR = path.join(__dirname, 'tasks');
 const TOOLS = 'Bash,Read,Edit,Write,MultiEdit,Grep,Glob';
 
 function parseArgs(argv) {
-  const o = { arms: ['baseline', 'xend'], runs: 1, model: 'sonnet', effort: 'low', tasks: '*', category: '', concurrency: 2, maxBudget: 2, profile: 'balanced', out: '', keep: false, dryRun: false, list: false, extra: [] };
+  const o = { arms: ['baseline', 'xend'], runs: 1, model: 'sonnet', effort: 'low', tasks: '*', category: '', concurrency: 2, maxBudget: 2, profile: 'balanced', ponytail: '', ponytailText: '', ponytailStrict: false, out: '', keep: false, dryRun: false, list: false, extra: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i], v = argv[i + 1];
     if (a === '--arms') { o.arms = v.split(','); i++; }
@@ -27,6 +28,9 @@ function parseArgs(argv) {
     else if (a === '--concurrency' || a === '-j') { o.concurrency = Number(v); i++; }
     else if (a === '--max-budget-usd') { o.maxBudget = Number(v); i++; }
     else if (a === '--profile') { o.profile = v; i++; }
+    else if (a === '--ponytail') { o.ponytail = v; i++; }
+    else if (a === '--ponytail-text') { o.ponytailText = v; i++; }
+    else if (a === '--ponytail-strict') o.ponytailStrict = true;
     else if (a === '--out') { o.out = v; i++; }
     else if (a === '--keep') o.keep = true;
     else if (a === '--dry-run') o.dryRun = true;
@@ -62,7 +66,11 @@ function prepareFixture(task, workRoot) {
 
 function cleanEnv(extra) {
   const env = Object.assign({}, process.env, extra);
-  for (const k of ['CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID', 'XEND_PROFILE', 'XEND_TERSE', 'XEND_SHAPE']) delete env[k];
+  // The baseline arm is structurally immune (it gets no --plugin-dir), so an ambient export
+  // — or an upstream ponytail install on the operator's machine — would contaminate one side
+  // only and look like a real effect.
+  for (const k of ['CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID', 'XEND_PROFILE', 'XEND_TERSE', 'XEND_SHAPE',
+    'XEND_PONYTAIL', 'XEND_PONYTAIL_TEXT', 'XEND_UPSTREAM_PONYTAIL', 'XEND_PONYTAIL_STRICT', 'PONYTAIL_DEFAULT_MODE']) delete env[k];
   return Object.assign(env, extra);
 }
 
@@ -74,7 +82,14 @@ function runClaude(task, arm, opts, work, stateDir) {
   if (arm === 'xend') args.push('--plugin-dir', ROOT);
   for (const e of opts.extra) args.push(...e.split(' '));
   const extraEnv = { XEND_STATE_DIR: stateDir };
-  if (arm === 'xend') extraEnv.XEND_PROFILE = opts.profile;
+  if (arm === 'xend') {
+    extraEnv.XEND_PROFILE = opts.profile;
+    // never let a benchmark depend on what happens to be installed on the runner
+    extraEnv.XEND_UPSTREAM_PONYTAIL = 'ignore';
+    if (opts.ponytail) extraEnv.XEND_PONYTAIL = opts.ponytail;
+    if (opts.ponytailText) extraEnv.XEND_PONYTAIL_TEXT = opts.ponytailText;
+    if (opts.ponytailStrict) extraEnv.XEND_PONYTAIL_STRICT = '1';
+  }
   return new Promise((resolve) => {
     const started = Date.now();
     execFile('claude', args, { cwd: work, env: cleanEnv(extraEnv), timeout: (task.timeout_s || 600) * 1000, maxBuffer: 64 * 1024 * 1024 },
@@ -149,6 +164,9 @@ async function runJob(job, opts, outDir, workRoot) {
     models: Object.keys(j.modelUsage || {}),
     shaping: shapingSummary(stateDir),
     model: opts.model, effort: opts.effort, profile: arm === 'xend' ? opts.profile : null,
+    ponytail: arm === 'xend' ? (opts.ponytail || null) : null,
+    ponytail_text: arm === 'xend' && opts.ponytail !== 'off' ? (opts.ponytailText || null) : null,
+    ponytail_strict: arm === 'xend' ? !!opts.ponytailStrict : false,
     answer_chars: (j.result || '').length,
     ts: new Date().toISOString(),
   };

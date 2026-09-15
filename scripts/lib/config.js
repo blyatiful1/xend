@@ -5,11 +5,17 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const ponytail = require('./ponytail.js');
+const { PONYTAIL_LEVELS, PONYTAIL_TEXTS, UPSTREAM_MODES } = ponytail;
 
 const PROFILES = {
   lite: {
     profile: 'lite',
     terse: 'lite',
+    ponytail: 'lite',        // lean build rules; 'adapted' text is xend's own condensation and is untested
+    ponytailText: 'adapted',
+    upstream: { ponytail: 'auto' },
+    ponytailStrict: false,
     shape: {
       enabled: true,
       maxChars: 30000,        // == Claude Code default cap: no extra head/tail cutting
@@ -36,6 +42,10 @@ const PROFILES = {
   balanced: {
     profile: 'balanced',
     terse: 'full',
+    ponytail: 'full',        // lean build rules; 'adapted' text is xend's own condensation and is untested
+    ponytailText: 'adapted',
+    upstream: { ponytail: 'auto' },
+    ponytailStrict: false,
     shape: {
       enabled: true,
       maxChars: 12000,        // head+tail only for generic output kinds; never diffs or test runs
@@ -62,6 +72,10 @@ const PROFILES = {
   aggressive: {
     profile: 'aggressive',
     terse: 'full',
+    ponytail: 'full',        // lean build rules; 'adapted' text is xend's own condensation and is untested
+    ponytailText: 'adapted',      // upstream-verbatim text is opt-in (XEND_PONYTAIL_TEXT=upstream): bench r5 measured +16.7% cost on micro-tasks
+    upstream: { ponytail: 'auto' },
+    ponytailStrict: false,
     shape: {
       enabled: true,
       maxChars: 8000,
@@ -147,6 +161,10 @@ function envOverrides(env) {
   for (const [name, key] of [['XEND_SHAPE_TESTRUNNERS', 'testRunners'], ['XEND_SHAPE_PKG', 'packageManagers'], ['XEND_SHAPE_HEADTAIL', 'headTail'], ['XEND_SHAPE_ANSI', 'stripAnsi'], ['XEND_SHAPE_MCP', 'mcp']]) {
     if (env[name] !== undefined) o.shape = Object.assign(o.shape || {}, { [key]: !/^(0|false|off)$/i.test(env[name]) });
   }
+  if (env.XEND_PONYTAIL && PONYTAIL_LEVELS.includes(env.XEND_PONYTAIL)) o.ponytail = env.XEND_PONYTAIL;
+  if (env.XEND_PONYTAIL_TEXT && PONYTAIL_TEXTS.includes(env.XEND_PONYTAIL_TEXT)) o.ponytailText = env.XEND_PONYTAIL_TEXT;
+  if (env.XEND_UPSTREAM_PONYTAIL && UPSTREAM_MODES.includes(env.XEND_UPSTREAM_PONYTAIL)) o.upstream = { ponytail: env.XEND_UPSTREAM_PONYTAIL };
+  if (env.XEND_PONYTAIL_STRICT !== undefined) o.ponytailStrict = !/^(0|false|off)$/i.test(env.XEND_PONYTAIL_STRICT);
   if (env.XEND_CHECKPOINT !== undefined) o.checkpoint = !/^(0|false|off)$/i.test(env.XEND_CHECKPOINT);
   return o;
 }
@@ -172,6 +190,10 @@ function resolve(opts) {
   for (const l of layers) cfg = deepMerge(cfg, l);
   cfg.profile = profileName;
   if (!TERSE_LEVELS.includes(cfg.terse)) cfg.terse = PROFILES[profileName].terse;
+  if (!PONYTAIL_LEVELS.includes(cfg.ponytail)) cfg.ponytail = PROFILES[profileName].ponytail;
+  if (!PONYTAIL_TEXTS.includes(cfg.ponytailText)) cfg.ponytailText = PROFILES[profileName].ponytailText;
+  if (!cfg.upstream || !UPSTREAM_MODES.includes(cfg.upstream.ponytail)) cfg.upstream = { ponytail: PROFILES[profileName].upstream.ponytail };
+  cfg.ponytailStrict = cfg.ponytailStrict === true;
   // A dedupe marker must never point at a result that server-side clearing has removed.
   if (cfg.contextEditing && cfg.contextEditing.enabled && cfg.shape) {
     if (cfg.shape.dedupe && cfg.shape.dedupeWindow > cfg.contextEditing.keepToolUses) cfg.shape.dedupeWindow = cfg.contextEditing.keepToolUses;
@@ -180,4 +202,4 @@ function resolve(opts) {
   return cfg;
 }
 
-module.exports = { PROFILES, TERSE_LEVELS, resolve, deepMerge, userConfigPath, findProjectConfig, readJson };
+module.exports = { PROFILES, TERSE_LEVELS, PONYTAIL_LEVELS, PONYTAIL_TEXTS, UPSTREAM_MODES, resolve, deepMerge, userConfigPath, findProjectConfig, readJson };

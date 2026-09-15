@@ -7,6 +7,7 @@ const path = require('path');
 const config = require('../scripts/lib/config.js');
 const context = require('../scripts/lib/context.js');
 const state = require('../scripts/lib/state.js');
+const ponytail = require('../scripts/lib/ponytail.js');
 
 test('profile defaults and env overrides', () => {
   const base = config.resolve({ env: {}, cwd: os.tmpdir() });
@@ -41,10 +42,58 @@ test('context block is stable and contains no timestamps', () => {
   assert.strictEqual(a, b);
   assert.ok(!/\d{4}-\d{2}-\d{2}/.test(a));
   assert.ok(a.includes('[xend]'));
-  assert.ok(a.length < 3000, 'block stays small: ' + a.length);
+
+  // Prefix regression guard: with no opts.ponytail the block is byte-identical to the
+  // pre-integration composition, so every existing caller and test is unaffected.
+  const preIntegration = [
+    'xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + ').',
+    context.TERSE[cfg.terse], context.TERSE_EXEMPTIONS, context.READING, context.CONDENSED, context.DELEGATION,
+  ].join('\n\n');
+  assert.strictEqual(a, preIntegration, 'ponytail integration changed the base block');
+  const offOpts = { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: 'adapted', strict: false } };
+  assert.strictEqual(context.build(Object.assign({}, cfg, { ponytail: 'off' }), offOpts), preIntegration);
+
+  // Three variant-aware ceilings. One number for all three would stop guarding anything:
+  // the upstream-verbatim text is ~2.7x the adapted one and would swallow any regression.
+  const lean = (over) => context.build(Object.assign({}, cfg, over), { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: over.ponytailText || 'adapted', strict: false } });
+  const blockOff = lean({ ponytail: 'off' });
+  const blockAdapted = lean({ ponytail: 'full', ponytailText: 'adapted' });
+  const blockUpstream = lean({ ponytail: 'full', ponytailText: 'upstream' });
+  assert.ok(blockOff.length < 1800, 'ponytail off: ' + blockOff.length);
+  assert.ok(blockAdapted.length < 2800, 'adapted lean rules: ' + blockAdapted.length);
+  assert.ok(blockUpstream.length < 7200, 'upstream-verbatim lean rules: ' + blockUpstream.length);
   const off = context.build(Object.assign({}, cfg, { terse: 'off', delegation: false, shape: { enabled: false }, readingDiscipline: false }), {});
   assert.ok(!off.includes('Output style'));
   assert.ok(!off.includes('Subagents'));
+});
+
+test('ponytail profile defaults, env overrides and clamps', () => {
+  const base = config.resolve({ env: {}, cwd: os.tmpdir() });
+  assert.strictEqual(base.ponytail, 'full');
+  assert.strictEqual(base.ponytailText, 'adapted');
+  assert.strictEqual(base.upstream.ponytail, 'auto');
+  assert.strictEqual(base.ponytailStrict, false);
+
+  const lite = config.resolve({ env: { XEND_PROFILE: 'lite' }, cwd: os.tmpdir() });
+  assert.strictEqual(lite.ponytail, 'lite');
+  assert.strictEqual(lite.ponytailText, 'adapted');
+
+  const agg = config.resolve({ env: { XEND_PROFILE: 'aggressive' }, cwd: os.tmpdir() });
+  assert.strictEqual(agg.ponytail, 'full');
+  assert.strictEqual(agg.ponytailText, 'adapted');
+
+  assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'ultra' }, cwd: os.tmpdir() }).ponytail, 'ultra');
+  assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'bogus' }, cwd: os.tmpdir() }).ponytail, 'full');
+  assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL_TEXT: 'bogus' }, cwd: os.tmpdir() }).ponytailText, 'adapted');
+  assert.strictEqual(config.resolve({ env: { XEND_UPSTREAM_PONYTAIL: 'ignore' }, cwd: os.tmpdir() }).upstream.ponytail, 'ignore');
+  assert.strictEqual(config.resolve({ env: { XEND_UPSTREAM_PONYTAIL: 'bogus' }, cwd: os.tmpdir() }).upstream.ponytail, 'auto');
+  assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL_STRICT: '1' }, cwd: os.tmpdir() }).ponytailStrict, true);
+  assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL_STRICT: 'off' }, cwd: os.tmpdir() }).ponytailStrict, false);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-pony-cfg-'));
+  fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({ ponytail: 'off' }));
+  assert.strictEqual(config.resolve({ env: {}, cwd: dir }).ponytail, 'off');
+  assert.deepStrictEqual(config.PONYTAIL_LEVELS, ponytail.PONYTAIL_LEVELS);
 });
 
 test('session state dir, overrides, and pruning', () => {

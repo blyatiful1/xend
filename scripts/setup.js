@@ -11,6 +11,41 @@ const config = require('./lib/config.js');
 // Project scope writes settings.local.json (gitignored by convention) so an experimental env var
 // such as CLAUDE_CODE_EXTRA_BODY is never pushed to teammates; --scope project-shared targets
 // the committed .claude/settings.json explicitly.
+const { execFileSync } = require('child_process');
+const ponytailLib = require('./lib/ponytail.js');
+
+const PONYTAIL_INSTALL = [
+  ['claude', ['plugin', 'marketplace', 'add', 'DietrichGebert/ponytail']],
+  ['claude', ['plugin', 'install', 'ponytail@ponytail', '-s', 'user', '-y']],
+];
+
+// Report who owns the lean ruleset. Never edits ~/.config/ponytail/config.json or another
+// plugin's enabledPlugins: xend does not silently reconfigure someone else's plugin.
+function ponytailStep(profileName, cwd, withRecommended, dry) {
+  const pt = ponytailLib.detect({ env: process.env, cwd });
+  const prof = config.PROFILES[profileName];
+  console.log('');
+  console.log('lean (ponytail) rules: level ' + prof.ponytail + ', text ' + prof.ponytailText +
+    (prof.ponytailText === 'upstream' ? ' (upstream-verbatim, the measured artifact)' : " (xend's adaptation, untested)"));
+  if (pt.injecting) {
+    console.log('  upstream ponytail is installed via ' + pt.channel + ' and injecting (mode ' + pt.mode + '); xend defers to it.');
+    console.log('  cost: upstream ~1,382 tok/session vs xend\'s adapted rules ~295 tok/session.');
+    console.log('  to use xend\'s cheaper text instead: XEND_UPSTREAM_PONYTAIL=ignore');
+    console.log('  to silence upstream instead: PONYTAIL_DEFAULT_MODE=off (or claude plugin disable ponytail)');
+    return;
+  }
+  if (pt.channel === 'skill-only') console.log('  ponytail is present as a bare skill at ' + pt.root + ', which self-activates zero times.');
+  else console.log('  no injecting upstream ponytail found; xend owns the ruleset.');
+  console.log('  for the upstream-verbatim ruleset (MIT, Dietrich Gebert) install it yourself:');
+  for (const [cmd, argv] of PONYTAIL_INSTALL) console.log('    ' + cmd + ' ' + argv.join(' '));
+  if (!withRecommended) { console.log('  (add --with-recommended to run those two commands now)'); return; }
+  if (dry) { console.log('  [dry-run] would run the two commands above'); return; }
+  for (const [cmd, argv] of PONYTAIL_INSTALL) {
+    try { execFileSync(cmd, argv, { stdio: 'inherit' }); }
+    catch (e) { console.log('  could not run "' + cmd + ' ' + argv.join(' ') + '"; run it by hand.'); break; }
+  }
+}
+
 function settingsPath(scope, cwd) {
   if (scope === 'project') return path.join(cwd, '.claude', 'settings.local.json');
   if (scope === 'project-shared') return path.join(cwd, '.claude', 'settings.json');
@@ -118,7 +153,10 @@ function main() {
   }
   console.log((dry ? '[dry-run] ' : '') + 'xend profile: ' + profileName + (profileChanged ? ' (written to ' + cfgFile + ')' : ' (unchanged)'));
 
-  // 2) native settings
+  // 2) lean (ponytail) ruleset ownership
+  ponytailStep(profileName, process.cwd(), withRecommended, dry);
+
+  // 3) native settings
   const cfg = config.PROFILES[profileName];
   const current = readJson(file);
   const changes = planChanges(profileName, cfg, current, withRecommended);

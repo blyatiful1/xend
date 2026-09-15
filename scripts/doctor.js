@@ -14,6 +14,9 @@ const { execFileSync } = require('child_process');
 const settingsLib = require('./lib/settings');
 const transcript = require('./lib/transcript');
 const pricing = require('./lib/pricing');
+const ponytailLib = require('./lib/ponytail');
+const contextLib = require('./lib/context');
+const configLib = require('./lib/config');
 
 const CHARS_PER_TOKEN = transcript.CHARS_PER_TOKEN;
 const IMPACT_RANK = { large: 0, medium: 1, small: 2 };
@@ -615,6 +618,77 @@ function checkLsp(cwd) {
   )];
 }
 
+
+// --- ponytail (lean build rules) ----------------------------------------------
+
+function checkPonytail(cwd) {
+  const findings = [];
+  const cfg = configLib.resolve({ cwd });
+  const pt = ponytailLib.detect({ env: process.env, cwd });
+  const own = ponytailLib.owns(pt, cfg);
+  const label = cfg.ponytailText === 'upstream' ? 'upstream-verbatim (measured)' : 'adapted (untested)';
+
+  if (pt.channel === 'skill-only') {
+    findings.push(finding(
+      'medium', 'plugins', 'ponytail is installed as a bare skill, so it injects nothing',
+      `found ${pt.root} with no .claude-plugin/plugin.json`,
+      'JetBrains measured this exact layout: "If you copy the SKILL.md into a skills folder and let the model decide when to use it, it will self-activate zero times." The measured -10.3% cost effect comes from the SessionStart hook, not from the skill file.',
+      'claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail — or delete the folder and let xend inject its own lean rules.',
+      { root: pt.root }
+    ));
+  }
+
+  if (own.upstreamOwns && pt.mode !== 'off') {
+    findings.push(finding(
+      'medium', 'plugins', 'The ponytail plugin injects its own ruleset every session',
+      `channel ${pt.channel}, mode ${pt.mode}${pt.version ? ', v' + pt.version : ''}`,
+      'Upstream injects about 5,252 bytes (~1,382 tokens) of fixed prefix per session. xend defers to it so the ruleset is not duplicated, and adds only ~90 tokens of reconciliation. On short sessions that prefix is not amortized (xend measured ~0.8% cost per 100 tokens of prefix on five-turn tasks).',
+      'Keep both (xend defers), or set XEND_UPSTREAM_PONYTAIL=ignore to use xend\'s ~295-token adapted rules instead, or PONYTAIL_DEFAULT_MODE=off to silence upstream.',
+      { channel: pt.channel, mode: pt.mode, version: pt.version }
+    ));
+  }
+
+  if (pt.subagentHook) {
+    findings.push(finding(
+      'medium', 'plugins', 'The ponytail plugin also injects into every subagent',
+      'a SubagentStart hook running ponytail-subagent.js was found',
+      'It re-injects ~1,382 tokens into every xend-scout and xend-reader call. Those are Haiku subagents whose entire purpose is to be cheap and to return citations only, so the hook works against their contract. xend ships no SubagentStart hook of its own.',
+      'There is no xend-side remedy: a plugin cannot disable another plugin\'s hook. Either accept the cost, disable ponytail (claude plugin disable ponytail), or raise it upstream.',
+      null
+    ));
+  }
+
+  if (pt.statuslineNudgePending) {
+    findings.push(finding(
+      'small', 'plugins', 'The ponytail plugin will append a statusline setup nudge',
+      'no ~/.claude/.ponytail-statusline-nudged flag file, and upstream is injecting',
+      'On its first run upstream appends a "STATUSLINE SETUP NEEDED ... Proactively offer to set this up" paragraph to the session prefix, which is unrequested work landing in context.',
+      'touch ~/.claude/.ponytail-statusline-nudged',
+      null
+    ));
+  }
+
+  const block = contextLib.build(cfg, {
+    ponytail: {
+      owns: own.ownsLean, upstreamOwns: own.upstreamOwns, injecting: own.injecting,
+      mode: pt.mode, channel: pt.channel, root: pt.root,
+      text: cfg.ponytailText, strict: cfg.ponytailStrict === true,
+    },
+  });
+  const bytes = Buffer.byteLength(block);
+  const checked = pt.evidence.filter((e) => e.startsWith('no ')).map((e) => e.slice(3));
+  findings.push(finding(
+    'small', 'plugins',
+    `Lean rules: level ${cfg.ponytail}, text ${label}; session block ${fmtInt(bytes)} B (~${fmtInt(estTokens(bytes))} tok)`,
+    (pt.installed ? `upstream found via ${pt.channel} (injecting=${pt.injecting}, mode=${pt.mode})` : 'no evidence of an upstream ponytail install found in: ' + checked.join(', ')) +
+      `; owner=${own.upstreamOwns ? 'ponytail plugin' : 'xend'}`,
+    'The "adapted" text is xend\'s own ~240-token condensation and is untested; the JetBrains numbers describe the ~1,382-token upstream-verbatim text (XEND_PONYTAIL_TEXT=upstream, the default on the aggressive profile).',
+    'n/a',
+    { level: cfg.ponytail, text: cfg.ponytailText, bytes, tokens: estTokens(bytes), owner: own.upstreamOwns ? 'upstream' : 'xend', evidence: pt.evidence }
+  ));
+  return findings;
+}
+
 function checkEnvironment() {
   const findings = [];
   const py = binaryExists('python3');
@@ -678,6 +752,7 @@ async function main() {
   findings.push(...settingsFindings);
   findings.push(...safe(() => checkMcp(mcp, merged)));
   findings.push(...safe(() => checkPlugins(merged)));
+  findings.push(...safe(() => checkPonytail(cwd)));
 
   try {
     findings.push(...(await checkRecentUsage(cwd)));
@@ -717,6 +792,7 @@ module.exports = {
   checkSettings,
   checkMcp,
   checkPlugins,
+  checkPonytail,
   checkRecentUsage,
   checkEnvironment,
   collectHookCommands,

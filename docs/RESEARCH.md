@@ -56,6 +56,7 @@ sessions and their context, (4) route bulky work to cheaper contexts, (5) only t
 |---|---|---|---|
 | JetBrains, caveman skill | SkillsBench, 86 tasks, paired, Claude Sonnet 5 at low effort, 3 runs, auto-graded 0-1 | -8.5% output tokens (advertised 65%); score 0.326 vs 0.311; sign test p = 0.82: no detectable quality change | A |
 | JetBrains, rtk | same harness, 425 billed trials | +7.6% cost at low effort (p = 0.004), +13.8% turns; break-even at high effort; hook touched ~20% of tool-result characters because Claude Code already truncates large output | A |
+| JetBrains, ponytail skill | 80 paired tasks, claude-sonnet-5 at medium effort, 251 trials / $246.09 | cost -10.3% (p = 0.004, "the first tool in this series that clearly saved money"); code -15.4% (p = 0.088, "the softest of our headline numbers"; advertised -54%); time -11%; quality 65 identical / 9 slightly worse / 6 better | A for cost, C for the code figure |
 | Adobe Research, CAVEWOMAN ([arXiv 2606.24083](https://arxiv.org/abs/2606.24083)) | 8 models, 5 datasets, 5 compression levels | output-side compression cuts realized cost 1.4-2.4x (up to 3x); compressing the *input* prompt raises net cost ~1.15x (up to 2.7x) and lowers accuracy: models answer longer and worse | A |
 | JetBrains Research, The Complexity Trap ([arXiv 2508.21433](https://arxiv.org/abs/2508.21433)) | SWE-bench Verified, 5 model configurations | observation masking (placeholders for old tool results) halves cost and matches or beats LLM summarization; +2.6% solve rate at 52% lower cost on one model; summarization extended trajectories 13-15% | A |
 | Anthropic, context editing + memory tool ([docs](https://platform.claude.com/docs/en/build-with-claude/context-editing)) | long-horizon agentic evaluation | +29% task performance with context editing, +39% with the memory tool added (a quality figure, not a cost figure; each clearing pass re-caches the remaining context) | B |
@@ -110,16 +111,43 @@ Each entry: **mechanism** → **xend implementation** → expected saving → ex
 
 **H18. Statistical gating is the only honest guarantee, and it must cover cost.** A paired design with bootstrap intervals, a sign test and a stated minimum detectable effect; promotion only when three gates pass at once: the one-sided 95% lower bound of the pass-rate delta is above -3 points, the upper bound of the cost change is below zero, and the upper bound of the turn delta is at most +0.25. Tokens and cost come from `modelUsage` and `total_cost_usd` (subagents included), never from the main-loop `usage` field, which excludes subagent work and would flatter delegation. Evidence merges across runs. → `bench/`. → Grade A for the mathematics. → Status: shipped; see section 6 for what the current suite can and cannot detect.
 
+**H19. A lazy-solution ruleset injected at SessionStart lowers cost without lowering quality.**
+Mechanism: a fixed ladder (YAGNI → already here → stdlib → native → installed dep → one line →
+minimum new code) plus a root-cause bug-fix rule shortens the *solution*, not the reading, so the
+model writes less code and takes fewer turns. → xend injects the rules from its existing
+SessionStart hook and **defers to the upstream ponytail plugin whenever one is actually injecting**,
+so exactly one copy reaches the model. → Saving: -10.3% cost (p = 0.004) on JetBrains' 80 paired
+tasks with the ~1,382-token upstream-verbatim text. → Quality: no significant difference (65/9/6). →
+**Grade B**: one independent paired study; the cost result is solid, the code result is not
+(p = 0.088) and the vendor advertised -54% against a measured -15.4%. → Counter-evidence: xend's own
+H16 finding that a fixed prefix is not amortized on five-turn tasks (~0.8% cost per 100 tokens), so
+the upstream text's +1,412 tokens would need to return >11.5% gross on xend's own suite. xend's
+default on `lite` and `balanced` is therefore a **240-token adaptation that nobody has measured**;
+this text is xend's adaptation and is untested. It needs only ~2.4% gross to break even, but its
+effect size is unknown and could be zero. → Validation: the paired A/B in §12 of `SPEC-ponytail.md`
+(`pony-off` vs `pony-adapted` is the decision comparison; `pony-upstream` and `pony-strict` price
+the verbatim text and xend's three `[xend]` reconciliation tags). → Status: **gated on that bench**,
+which has not been run: the pre-registered promotion rule is PROMOTE only when the one-sided 95%
+bounds satisfy Δcost ≤ +3.0%, Δpass ≥ -3.0 pp and Δturns ≤ +0.25; anything else demotes the feature
+to opt-in on `lite` and `balanced`, and a pass-rate or turn regression turns it off everywhere.
+Outcome of that gate (runs r4 and r5): the adapted text stays on in every profile (within noise of
+no ponytail); the upstream-verbatim text failed the cost threshold (+16.7%) and is opt-in everywhere,
+because the JetBrains number was measured on a different, longer task distribution.
+
 ## 4. Rejected or deferred
 
 | Idea | Why not (evidence) |
 |---|---|
 | Summarize tool output with a small model | Masking matched or beat it and was cheaper; summaries hid stopping signals and lengthened trajectories 13-15% (Complexity Trap). xend's transforms never call a model. |
-| Symbol and abbreviation "compression" (`cfg`, `impl`, arrows) | Tokenizers split invented abbreviations into as many tokens as the word; arrows are their own token. Zero saving, real ambiguity (caveman's own finding). |
+| Symbol and abbreviation "compression" (`cfg`, `impl`, arrows) | Tokenizers split invented abbreviations into as many tokens as the word; arrows are their own token. Zero saving, real ambiguity (caveman's own finding). Ponytail's own `Pattern:` line *instructs* emitting an arrow; xend neutralises it rather than deleting it — the adapted text says "what was skipped, when to add it" in words, and the upstream-verbatim path appends an `[xend]` sentence to the same line. The vendored ruleset retains **four** arrow characters by design (fidelity beats tidiness); if arrows ever show up in model prose, all four get replaced with words and every "byte-identical" claim in the docs and tests is downgraded in the same change. |
 | Compress the user's prompt or CLAUDE.md into telegraphic prose | CAVEWOMAN: input compression raises net cost ~1.15x and lowers accuracy. xend never rewrites prompts and audits memory files structurally only. |
 | Rewrite commands before execution (rtk-style) | Independent benchmark: +7.6% cost, +13.8% turns. The model cannot recover what it never received. xend shapes results after execution and keeps the original. |
 | Block large Reads with a PreToolUse deny | Forces an extra turn on every legitimately large read; no rigorous before/after exists. xend's `aggressive` profile turns such reads into honest ranged reads instead. |
 | Replace a large Read result with a synthesized outline | A heuristic outline misses definitions (decorated methods, re-exports, `const f = () =>`) and the model reads a missing symbol as absent; it also makes the Read shape incoherent. Removed after review. |
+| The caveman skill, vendored verbatim | xend's terse block **already is that style** (it descends from caveman and is credited as such), so a second copy is pure prefix tax; ponytail's own Boundaries section names caveman as its prose partner, and that role is already filled. Deliberately not vendored. |
+| ponytail as an on-demand skill | JetBrains: "it will self-activate zero times." An on-demand copy costs ~206 tokens of skill-index description in every session and does nothing. The verbatim file is vendored under `vendor/ponytail/`, which Claude Code does not scan, so it costs zero tokens. |
+| Injecting the upstream-verbatim ponytail text by default on every profile | 1,382 tokens per session against xend's own measured ~0.8% cost per 100 tokens of prefix on five-turn tasks: ~+11.5% predicted, more than the whole effect JetBrains measured. Available behind `ponytailText: 'upstream'` (opt-in in every profile after bench r5 measured +16.7%) and benchable. |
+| Porting ponytail's `SubagentStart` hook | It would add ~1,382 tokens to every `xend-scout` and `xend-reader` call — Haiku subagents whose entire purpose is to be cheap — and would extend beyond what JetBrains measured, which was main-session injection only. |
 | Minify JSON in tool output | Unmeasured token effect (pretty JSON tokenizes cheaply) and a real correctness risk: an `Edit` after `cat file.json` must match the pretty-printed file on disk. Removed from all profiles. |
 | Shorten repeated `Read` results | A Read is the model's working copy; hiding it invites an `Edit` from memory. Dedupe is Bash-only. |
 | Cut the middle of diffs or multi-failure test runs | The middle hunk or the middle failure is exactly what a reviewer or a fixer needs. Head/tail applies to generic output only. |
@@ -169,6 +197,7 @@ power per run and are the next step for the suite.
 - Run r1 (16 tasks, Claude Sonnet 5, low effort, one trial per arm, pre-review defaults): pass rate 93.8% in both arms; output tokens -9.0%; turns 4.8 to 4.6; cost $0.106 to $0.103 per task; the log-needle task 8 to 4 turns and 455k to 206k tokens; short five-turn tasks +2% for the plugin's prefix.
 - Run r2 (21 tasks including 5 adversarial, two trials per arm, revised defaults): pass rate 90.5% to 95.2% (no task worse, two better; sign test p = 0.50); output tokens -3.2%; turns 4.5 to 4.6; total tokens +6.4%; cost +9.0% (95% CI +6.1% to +11.9%); minimum detectable pass-rate drop 8.2 points; gate: quality PASS, cost FAIL, turns INCONCLUSIVE. Shaping fired on one task (the 270-hit grep refactor). The plugin's own prefix explains the cost: uncached input +12.7%.
 - Run r3 (same suite, one trial, prefix trimmed by ~40%, the shipped configuration): pass rate 95.2% to 90.5%, the difference being one adversarial task (`adv-middle-of-output`) that passed 1 of 3 times in each arm across r2 and r3; output tokens -8.6%; turns 4.8 to 4.5; total tokens +0.8%; uncached input +8.4%; cost +3.5% (95% CI -1.2% to +7.9%); gate: quality INCONCLUSIVE (MDE 11.8 points at n=21 x 1), cost INCONCLUSIVE, turns PASS. Merged r2 + r3 (63 paired runs, mixed configurations): pass +1.6 points (95% CI 0 to +4.8), output -5.5%, turns unchanged, cost +6.9%. Conclusion: on five-turn tasks the shipped plugin is cost-neutral to slightly negative and quality-neutral; its savings have to be shown on long and reading-heavy sessions, which this suite does not contain yet.
+- Run r4 (same suite, one trial, ponytail `full` with xend's adapted text, the shipped `balanced` default): pass rate 90.5% in both arms (the same two tasks fail on both sides); output tokens -4.9%; turns 4.3 to 4.5; total tokens +6.8%; cost +3.9% (95% CI -4.5% to +10.0%); gate INCONCLUSIVE on cost and turns. Against r3 (xend without ponytail: cost +3.5%) the adapted ruleset is indistinguishable on these micro-tasks, which write very little code to begin with; the JetBrains effect was measured on larger SkillsBench tasks. Run r5 (same suite, one trial, ponytail `full` with the upstream-verbatim text): pass rate 95.2% to 90.5% (the flaky adversarial task); output tokens +8.6%; turns 4.5 to 5.0; uncached input +20.9%; cost +16.7% (95% CI +10.6% to +24.0%); gate FAIL on cost. The three xend arms line up with prefix size: no ponytail $0.106, adapted $0.112, upstream $0.117 per task. Conclusion: ponytail's measured saving does not transfer to five-turn micro-tasks; the shipped default is the small adapted text in every profile and the upstream text is opt-in for long, code-heavy sessions, where the JetBrains result was obtained.
 - A benchmark bug worth recording: the runner passed a relative state directory, so hooks wrote their logs under the fixture copy and the "shaping activity" column read zero for every task. Every number above was still produced by real runs; the log was simply lost. Fixed by resolving the directory to an absolute path.
 
 ## 8. Sources
