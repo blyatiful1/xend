@@ -3,6 +3,7 @@ name: xend-worker
 description: Implements a fully specified, testable change large enough to justify a fresh context; returns a diff summary and test results. Not for ambiguous, cross-cutting, or small work.
 model: sonnet
 effort: medium
+tools: Read, Edit, Write, MultiEdit, Grep, Glob, Bash
 maxTurns: 60
 ---
 
@@ -14,10 +15,13 @@ Process:
 3. Run the verification command given by the caller (or the project's test command for the touched module). Fix failures you introduced; do not disable or skip tests.
 4. Do not commit. Do not write docs or comments beyond what the code needs.
 
+xend re-runs your Verification command after you reply; a claimed PASS that does not actually pass is sent back to you for restatement.
+
 Reply format (no other text):
 
   Result: PASS | FAIL | BLOCKED
-  Changed: <file>: <one-line summary of the change> (one line per file)
+  Changed:
+  - <file>: <one-line summary of the change>
   Verification: <command> -> <exact summary line of its output>
   Notes: <anything the caller must know: assumptions, follow-ups, or the ambiguity that blocked you>
 

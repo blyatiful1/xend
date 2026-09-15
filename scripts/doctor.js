@@ -362,6 +362,24 @@ function checkSettings(cwd) {
     );
   }
 
+  const subagentModelFromSettings = envVal(merged.env, 'CLAUDE_CODE_SUBAGENT_MODEL');
+  const subagentModelFromProcess = envVal(process.env, 'CLAUDE_CODE_SUBAGENT_MODEL');
+  if (subagentModelFromSettings !== undefined || subagentModelFromProcess !== undefined) {
+    const source = subagentModelFromSettings !== undefined ? 'settings.json env' : 'process environment';
+    const value = subagentModelFromSettings !== undefined ? subagentModelFromSettings : subagentModelFromProcess;
+    findings.push(
+      finding(
+        'medium',
+        'settings',
+        "CLAUDE_CODE_SUBAGENT_MODEL overrides every subagent's model",
+        `CLAUDE_CODE_SUBAGENT_MODEL = ${truncate(String(value), 80)} (from ${source})`,
+        "It defeats xend's tiering (Haiku scout/worker-lite, Sonnet worker/reviewer) so cheap delegation may silently run on an expensive model or vice versa.",
+        'Unset it unless you intend one model for all subagents.',
+        { value, source }
+      )
+    );
+  }
+
   if (envVal(merged.env, 'CLAUDE_CODE_EXTRA_BODY') !== undefined) {
     findings.push(
       finding(
