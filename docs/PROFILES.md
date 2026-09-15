@@ -20,7 +20,7 @@ Any layer may set `"profile"` and override individual keys. Example `.xend.json`
 |---|---|---|---|
 | `terse` | `lite` | `full` | `full` |
 | `ponytail` (lean build rules: ladder, root-cause fixes, no unrequested abstraction) | `lite` | `full` | `full` |
-| `ponytailText` (**`adapted` is xend's condensation and is untested; `upstream` is the upstream-verbatim text JetBrains measured**) | `adapted` | `adapted` | `upstream` |
+| `ponytailText` (**`adapted` is xend's condensation; `upstream` is the upstream-verbatim text JetBrains measured, opt-in in every profile after bench r5 measured +16.7% cost on micro-tasks**) | `adapted` | `adapted` | `adapted` |
 | `upstream.ponytail` (`auto` defers to an installed, injecting ponytail plugin; `yield` always defers; `ignore` never does) | `auto` | `auto` | `auto` |
 | `ponytailStrict` (drop every xend-authored bridging sentence so the ponytail portion is byte-identical to upstream's own hook output; for replication runs) | `false` | `false` | `false` |
 | `shape.maxChars` (head+tail beyond this, generic output kinds only; never diffs or test runs) | 30000 (native cap only) | 12000 | 8000 |
@@ -100,12 +100,7 @@ Ownership, and what the block looks like at `balanced`:
 channel xend cannot see, such as a Cursor rule or an enterprise-managed settings layer), and
 `ignore` behaves as if upstream were absent.
 
-**Switching profile changes which prose is active.** `aggressive` defaults to
-`ponytailText: upstream`, so moving to or from it swaps xend's ~240-token adaptation for
-upstream's ~1,382-token verbatim text (or back). That is deliberate — `aggressive` is documented
-for long sessions, the regime JetBrains measured, where a fixed prefix amortizes — but it is not
-silent: `/xend:ponytail status` and `/xend:doctor` both print `text: adapted (untested)` or
-`text: upstream-verbatim (measured)`.
+No profile selects `ponytailText: upstream` by default. Setting it (config, `XEND_PONYTAIL_TEXT=upstream`, or `/xend:ponytail` with the session override) swaps xend's ~215-token adaptation for upstream's ~1,382-token verbatim text; bench run r5 measured that swap at +16.7% cost and +8.6% output tokens on five-turn tasks, so use it only where the JetBrains result applies: long, code-heavy sessions. `/xend:doctor` reports the active text as `text: adapted` or `text: upstream-verbatim (measured)`.
 
 xend ships **no** `SubagentStart` hook and does not port upstream's: it would add ~1,382 tokens to
 every `xend-scout` and `xend-reader` call, which are Haiku subagents whose whole purpose is to be

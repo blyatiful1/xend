@@ -51,7 +51,7 @@ What xend never does: rewrite your prompts, rewrite memory files into telegraphi
 |---|---|---|
 | `lite` | terse `lite`, noise-only output cleanup, repeat shortening, audits, plus lean `lite` (xend's adapted ruleset) | you want a conservative start and your own numbers first |
 | `balanced` (default) | terse `full`, structured shaping (tests, installs, long generic output), delegation, checkpoints, plus lean `full` (xend's adapted ruleset) | everyday work |
-| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental), plus lean `full` with the **upstream-verbatim** ruleset (the text JetBrains measured; ~1,400 tokens more per session, which only amortizes on long sessions) | long sessions; validate with the bench first |
+| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental), plus lean `full` (adapted text; set `XEND_PONYTAIL_TEXT=upstream` for the upstream-verbatim ruleset JetBrains measured, ~1,400 tokens more per session) | long sessions; validate with the bench first |
 
 Switch with `/xend:profile <name>` or a `.xend.json` in the repo. Every transform has a kill switch (`XEND_SHAPE_TESTRUNNERS=0`, `XEND_TERSE=off`, ...). Details: `docs/PROFILES.md`.
 
@@ -74,7 +74,9 @@ xend's own paired runs (Claude Sonnet 5 at low effort, same tasks under both arm
 | r3, trimmed prefix (shipped config) | 21 x 1 | 95.2% -> 90.5% (one adversarial task that is flaky in both arms) | -8.6% | 4.8 -> 4.5 | +3.5% (95% CI -1.2% to +7.9%) |
 | r2 + r3 merged | 63 paired runs | 92.1% -> 93.7% (95% CI +0.0 to +4.8 pp) | -5.5% | 4.6 -> 4.6 | +6.9% |
 | r4, ponytail on (xend's adapted text, the shipped `balanced` default) | 21 x 1 | 90.5% -> 90.5% (same two tasks fail in both arms) | -4.9% | 4.3 -> 4.5 | +3.9% (95% CI -4.5% to +10.0%) |
-| r5, ponytail on (upstream-verbatim text) | 21 x 1 | see `bench/results/r5-ponytail-upstream/report.md` | | | |
+| r5, ponytail on (upstream-verbatim text, opt-in) | 21 x 1 | 95.2% -> 90.5% (the flaky adversarial task again) | **+8.6%** | 4.5 -> 5.0 | **+16.7%** (95% CI +10.6% to +24.0%) |
+
+On these micro-tasks ponytail does not reproduce the JetBrains saving: the tasks write too little code for a "write less code" rule to remove any, so only the rule's prefix shows up. The adapted text (about 215 tokens) is within noise of no ponytail at all (r3 vs r4); the upstream-verbatim text (about 1,400 tokens) costs 17% more and makes the model write longer replies and take more turns. The JetBrains result came from larger SkillsBench tasks. Hence the shipped default is the adapted text in every profile, and the upstream text is opt-in for people who want the measured artifact on long, code-heavy work.
 
 Read r2 carefully, because it is the kind of number this project exists to surface. Quality was never worse on any task and improved on two. But these tasks average 4.5 turns, the plugin's fixed prefix (session block plus skill and agent descriptions) is cache-written once per session and not amortized over so few turns, and the shaping layer had something to condense on one task out of 21. The gate therefore returns **FAIL on cost** for micro-tasks, exactly as rtk's independent benchmark did for rtk. Where xend does win is longer and reading-heavier work: in r1 the log-analysis task went from 8 turns and 455k tokens to 4 turns and 206k, and the navigation task in r2 used 23% fewer tokens with one turn less. After r2 the prefix was cut by roughly 40%; r3 shows the overhead more than halved (+3.5%, interval including zero) with output tokens down 8.6% and turns down. The levers the bench cannot see at all (cache TTL across pauses, MCP output caps, compaction avoidance through checkpoints and `/clear`, deferred tool schemas) are applied through `/xend:setup` and `/xend:doctor`.
 

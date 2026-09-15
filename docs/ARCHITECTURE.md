@@ -36,7 +36,7 @@ no database, and no dependency beyond Node.js 18+.
 |---|---|---|---|
 | L0 Measure | Know where tokens go before and after | `scripts/stats.js` (session JSONL), `scripts/doctor.js` (static audit), `bench/` (paired A/B) | all |
 | L1 Say less | Terse output style; caveman-compatible levels | SessionStart `additionalContext` (once per session, cache-stable) + `/xend:terse` skill | lite: `lite`, balanced: `full` |
-| L1b Build less | Lazy-solution ladder: YAGNI, reuse, stdlib, native, one line; root-cause bug fixes | SessionStart `additionalContext` after upstream detection + `/xend:ponytail` | lite: `lite`, balanced: `full`, aggressive: `full` (upstream-verbatim text) |
+| L1b Build less | Lazy-solution ladder: YAGNI, reuse, stdlib, native, one line; root-cause bug fixes | SessionStart `additionalContext` after upstream detection + `/xend:ponytail` | lite: `lite`, balanced and aggressive: `full`, all with the adapted text; the upstream-verbatim text is opt-in |
 | L2 Read less | Lossless-recoverable shaping of tool results | PostToolUse `updatedToolOutput` on Bash, Read, Grep, Glob, MCP tools | balanced |
 | L3 Delegate cheaply | Haiku/Sonnet subagents with a verify-or-escalate contract | `agents/*.md` with `model:` frontmatter + `/xend:route` skill | balanced |
 | L4 Keep context lean | Checkpoints around `/clear` and compaction; reading discipline | PreCompact hook, SessionStart(`compact|clear`), `/xend:checkpoint` | balanced |

@@ -73,7 +73,7 @@ const PROFILES = {
     profile: 'aggressive',
     terse: 'full',
     ponytail: 'full',        // lean build rules; 'adapted' text is xend's own condensation and is untested
-    ponytailText: 'upstream',
+    ponytailText: 'adapted',      // upstream-verbatim text is opt-in (XEND_PONYTAIL_TEXT=upstream): bench r5 measured +16.7% cost on micro-tasks
     upstream: { ponytail: 'auto' },
     ponytailStrict: false,
     shape: {

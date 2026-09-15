@@ -80,7 +80,7 @@ test('ponytail profile defaults, env overrides and clamps', () => {
 
   const agg = config.resolve({ env: { XEND_PROFILE: 'aggressive' }, cwd: os.tmpdir() });
   assert.strictEqual(agg.ponytail, 'full');
-  assert.strictEqual(agg.ponytailText, 'upstream');
+  assert.strictEqual(agg.ponytailText, 'adapted');
 
   assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'ultra' }, cwd: os.tmpdir() }).ponytail, 'ultra');
   assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'bogus' }, cwd: os.tmpdir() }).ponytail, 'full');
