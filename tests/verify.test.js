@@ -557,12 +557,18 @@ test('recordLaunch: caps the registry at the 200 most recent entries', () => {
 // ============================================================================
 
 function runHook(scriptPath, input, env) {
-  const res = spawnSync(process.execPath, [scriptPath], {
+  // Strip NODE_TEST_CONTEXT: this test suite itself runs under `node --test`, and that env var
+  // would otherwise leak into a fixture's own `node --test ...` verify command (run as a
+  // grandchild by scripts/lib/verify.js's runVerify), making it behave as a v8-serialized child
+  // reporter instead of a normal process. Production hook invocations never run inside a test
+  // runner, so this only matters for the fixtures here.
+  const childEnv = Object.assign({}, process.env, env);
+  delete childEnv.NODE_TEST_CONTEXT;
+  return spawnSync(process.execPath, [scriptPath], {
     input: JSON.stringify(input),
     encoding: 'utf8',
-    env: Object.assign({}, process.env, env),
+    env: childEnv,
   });
-  return res;
 }
 
 function setupProject() {

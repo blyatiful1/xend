@@ -84,7 +84,7 @@ for key, typ in required.items():
 if data.get("name") != slug:
     problems.append(f"name '{data.get('name')}' does not match directory '{slug}'")
 
-valid_categories = {"bugfix", "feature", "refactor", "reading", "navigation", "qa"}
+valid_categories = {"bugfix", "feature", "refactor", "reading", "navigation", "qa", "project"}
 if data.get("category") not in valid_categories:
     problems.append(f"invalid category '{data.get('category')}'")
 
