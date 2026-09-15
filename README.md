@@ -2,7 +2,7 @@
 
 **Spend fewer tokens in Claude Code without losing quality.**
 
-xend is a Claude Code plugin built from what the evidence says actually works: keep the prompt cache warm, shrink what the model *reads* (not just what it writes), reset context cheaply, route bulky work to cheaper models with verification, and measure everything with a paired benchmark instead of a marketing percentage. No proxy, no daemon, no database; Node.js 18+ is the only dependency.
+xend is a Claude Code plugin built from what the evidence says actually works: keep the prompt cache warm, shrink what the model *reads* (not just what it writes), reset context cheaply, route bulky work to cheaper models with verification, keep file contents out of the main model's context by planning on the main model and building with verified cheap subagents, and measure everything with a paired benchmark instead of a marketing percentage. No proxy, no daemon, no database; Node.js 18+ is the only dependency.
 
 Where the numbers come from: `docs/RESEARCH.md` (evidence base and 18 hypotheses, each graded), `docs/ARCHITECTURE.md` (how each mechanism maps to a native Claude Code extension point), `bench/` (the quality gate).
 
@@ -29,6 +29,7 @@ Then, in a new session:
 /xend:doctor                              audit this machine for token waste (offline)
 /xend:setup balanced --with-recommended   apply the profile and the recommended native settings (backup + diff)
 /xend:stats                               what the last session spent, and what shaping removed
+/xend:plan                                architect plan status, or turn it off/on for this session
 ```
 
 ## What it does

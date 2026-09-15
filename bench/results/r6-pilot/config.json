@@ -1,0 +1,37 @@
+{
+  "opts": {
+    "arms": [
+      "arch-sonnet:xend:sonnet:architect"
+    ],
+    "runs": 1,
+    "model": "sonnet",
+    "effort": "medium",
+    "tasks": "project-log-pipeline",
+    "category": "",
+    "concurrency": 1,
+    "maxBudget": 2,
+    "tools": "",
+    "profile": "balanced",
+    "ponytail": "",
+    "ponytailText": "",
+    "ponytailStrict": false,
+    "out": "bench/results/r6-pilot",
+    "keep": false,
+    "dryRun": false,
+    "list": false,
+    "extra": []
+  },
+  "arms": [
+    {
+      "label": "arch-sonnet",
+      "kind": "xend",
+      "model": "sonnet",
+      "mode": "architect"
+    }
+  ],
+  "tasks": [
+    "project-log-pipeline"
+  ],
+  "claude_version": "2.1.272 (Claude Code)",
+  "started": "2026-09-15T13:55:33.787Z"
+}
