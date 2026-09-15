@@ -88,9 +88,17 @@ The practical guidance that follows from the data: install xend for sessions tha
 
 Architect mode (`docs/ARCHITECTURE.md` L7) is a different bet from the layers above: instead of shrinking what the main model reads, it keeps file bodies out of the main model's context entirely by having it plan and delegating the reading and editing to disposable Haiku/Sonnet subagents, verified by a deterministic hook rather than trusted. Two headless smoke tests *(verified here)* shaped the design: given a three-module package to implement, a Sonnet session with the architect paragraph in its context but no gate did the whole task itself — 10 turns, $0.28, zero subagents. A first, soft gate that named `plan off` as its way out was taken exactly that way: the model ran `plan off` and finished directly — 11 turns, one denial, $0.18. A behavioural rule with a strong prior against it ("just do the work") needed a mechanical floor with no advertised exit, which is why the shipped gate (`scripts/pre-edit-gate.js`) never mentions a way to disable itself.
 
-Whether the extra machinery pays for itself is a question for the project bench (`bench/tasks/project-*`, `--arms ...:xend:...:architect`), which has not been run yet:
+Whether the extra machinery pays for itself is a question for the project bench (`bench/tasks/project-*`, `--arms ...:xend:...:architect`), measured in runs r6, r7 and r7b:
 
-<!-- R6 -->
+Runs r6, r7 and r7b (`bench/results/`, one trial per arm, main model at medium effort, hidden tests as the score; architect arms plan from the first file):
+
+| Task | solo Sonnet | plain xend on Sonnet | architect on Sonnet | solo Fable | architect on Fable |
+|---|---|---|---|---|---|
+| ledger CLI (greenfield, 60 hidden tests) | 60/60, 18 turns, $0.51 | 60/60, 19 turns, $0.58 | 60/60, 5 turns, $1.15 (6 Sonnet builders); Haiku builders forced: 10 turns, $1.76 | 60/60, 12 turns, $1.82 | 60/60, 26 turns, $2.89 (3 Haiku builders, $0.06); Haiku forced: 40 turns, $4.57 |
+| log pipeline (greenfield, 58) | 58/58, 21 turns, $0.51 | 58/58, 15 turns, $0.39 | 58/58, 2 turns, $1.14 (6 Sonnet builders); Haiku forced: 8 turns, $1.82 | 58/58, 14 turns, $1.39 | 58/58, 22 turns, $2.48 (3 Haiku builders, $0.05); Haiku forced: 19 turns, $2.07, no builders used |
+| soft-delete across a 50-module codebase (brownfield, 56) | 56/56, 36 turns, $0.54 | 56/56, 34 turns, $0.52 | 56/56, 4 turns, $1.08 (6 builders, Haiku share $0.10) | 56/56, 20 turns, $1.27 | 56/56, 14 turns, $1.77 (5 Haiku builders, $0.17) |
+
+Every arm passed every hidden test, so the comparison is cost and turns alone. Plain xend (shaping, terse style, reading rules, no architect) was cheaper than solo Sonnet on all three long tasks: -5.0% on the two greenfield tasks and -3.9% on the brownfield one, with fewer turns each time. After five micro-task runs that were cost-neutral to negative, this is the first favourable result, and it is the one the evidence predicted: shaping pays on long, reading-heavy sessions, not on five-turn tasks. Architect mode never beat solo: +125% (Sonnet planner, Sonnet builders), +251% (Sonnet planner, Haiku builders), +99% on the brownfield task; Fable as planner cost +67% and +39% over solo Fable. The main context did get tiny (2-5 turns instead of 18-36) and the Haiku builders did their share for $0.05-0.17 per task with verified passes, but two costs ate the saving: every builder pays a cold prefix plus its own reading, and the planner's briefs are output tokens (26k on Fable, about $1.30 of its $1.77). On tasks a single Sonnet context finishes for about $0.50 there is no reading bill large enough to move. The layer ships as an opt-in (`/xend:plan on`, `XEND_ARCHITECT=1`) for work a single context cannot hold, and is off in every profile.
 
 On tasks below the size floor (three files or fewer, fewer than 8 tool calls) the layer is off by construction: the model works directly, exactly as without it.
 

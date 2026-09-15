@@ -1,6 +1,6 @@
 # SPEC: xend architect mode (L7)
 
-Status: implementation spec. Written by the planning model; built by cheaper worker agents; every
+Status: implemented and measured (bench runs r6, r7, r7b: never cheaper than a single context at this task size; opt-in in every profile). Written by the planning model; built by cheaper worker agents; every
 claim in it is either verified in this environment (marked *(verified)*) or a design decision.
 
 ## 0. Why
