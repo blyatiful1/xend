@@ -21,10 +21,9 @@ are listed at the end of this file.
 | Fetch date | 2026-09-15 |
 | How fetched | `claude plugin marketplace add DietrichGebert/ponytail`, which clones the repo to `~/.claude/plugins/marketplaces/ponytail`; SHA read with `git rev-parse HEAD` in that clone |
 
-The commit SHA above **was actually observed** in a real clone during vendoring. It was
-not copied from `ponytail-repo-meta.json` / `-issues.json` / `-releases.json` / `-tags.json`
-in the research scratchpad — those files contain only a GitHub API access-error payload and
-hold no SHA.
+The commit SHA above **was actually observed** in a real clone during vendoring (the
+`git rev-parse HEAD` command in the table), not taken from a release page or an API
+listing.
 
 ## Integrity anchors
 
