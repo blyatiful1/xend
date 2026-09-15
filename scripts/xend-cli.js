@@ -24,6 +24,7 @@ const state = require('./lib/state.js');
 const context = require('./lib/context.js');
 const ponytail = require('./lib/ponytail.js');
 const plan = require('./lib/plan.js');
+const shape = require('./lib/shape.js');
 
 function arg(name) { const i = process.argv.indexOf(name); return i !== -1 ? process.argv[i + 1] : undefined; }
 
@@ -242,6 +243,20 @@ function main() {
       ponytailCommand(sid, String(rawArg || 'status').toLowerCase(), cwd);
       return;
     }
+    case 'outline': {
+      const [file, ...outlineArgs] = rest;
+      if (!file) { console.log('usage: xend-cli.js outline <file> [--max N]'); process.exitCode = 1; return; }
+      let content;
+      try { content = fs.readFileSync(file, 'utf8'); }
+      catch (_) { console.log('outline: cannot read ' + file); process.exitCode = 1; return; }
+      const maxArg = outlineArgs.indexOf('--max');
+      const maxN = maxArg !== -1 ? parseInt(outlineArgs[maxArg + 1], 10) : 300;
+      const entries = shape.outline(content, file, maxN);
+      if (!entries) { console.log('no outline available for ' + file + ' (unsupported extension); Grep for the symbol instead'); return; }
+      for (const e of entries) console.log(e);
+      console.log('(heuristic outline: decorated, nested or one-line definitions may be missing; Read the range to be sure)');
+      return;
+    }
     case 'plan': {
       const [sub, ...planArgs] = rest;
       planCommand(sub, planArgs, cwd);
@@ -275,7 +290,7 @@ function main() {
       return;
     }
     default:
-      console.log('usage: xend-cli.js config|context|state-dir|set|profile|note|ponytail|plan');
+      console.log('usage: xend-cli.js config|context|state-dir|set|profile|note|ponytail|outline|plan');
   }
 }
 
