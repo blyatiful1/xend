@@ -71,8 +71,8 @@ does it, or breaks it into smaller tasks). `plan next` applies this automaticall
 
 ```js
 architect: {
-  enabled: false,        // lite
-  enabled: true,         // balanced, aggressive
+  enabled: false,        // lite, balanced, aggressive: opt-in since bench r6/r7 demoted it
+                          // (measured +125% to +250% cost on greenfield project tasks, never cheaper)
   minFiles: 3,           // guidance in the session block only
   minToolCalls: 8,
   verify: true,          // run the SubagentStop verifier
@@ -82,7 +82,7 @@ architect: {
 ```
 
 Env: `XEND_ARCHITECT=0|1` overrides `architect.enabled`; `XEND_VERIFY=0` disables the verifier.
-`.xend.json` may set any key. Session override: `/xend:plan off` sets `architect: false` for the session.
+`.xend.json` may set any key. Session override: `/xend:plan off` sets `architect: false` for the session, `/xend:plan on` opts back in.
 
 ## 4. Session block (`scripts/lib/context.js`)
 

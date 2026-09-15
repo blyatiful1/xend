@@ -6,6 +6,8 @@ disable-model-invocation: true
 allowed-tools: Bash(node *)
 ---
 
+Architect mode is off unless enabled with `/xend:plan on`, `XEND_ARCHITECT=1` or `.xend.json`.
+
 Requested: `$ARGUMENTS` (empty means `status`). It must be one of `status`, `next`, `off`, `on`.
 
 - **status** or **next** (default): run exactly, using the requested value:

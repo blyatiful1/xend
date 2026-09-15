@@ -1,0 +1,69 @@
+{
+  "opts": {
+    "arms": [
+      "solo-sonnet:baseline:sonnet",
+      "plain-sonnet:xend:sonnet:plain",
+      "arch-sonnet:xend:sonnet:architect",
+      "solo-fable:baseline:fable",
+      "arch-fable:xend:fable:architect"
+    ],
+    "runs": 1,
+    "model": "sonnet",
+    "effort": "medium",
+    "tasks": "project-brownfield-softdelete",
+    "category": "",
+    "concurrency": 3,
+    "maxBudget": 2,
+    "tools": "",
+    "profile": "balanced",
+    "ponytail": "",
+    "ponytailText": "",
+    "ponytailStrict": false,
+    "armEnv": "XEND_ARCHITECT_MIN_FILES=1",
+    "out": "bench/results/r7b-brownfield",
+    "keep": false,
+    "dryRun": false,
+    "list": false,
+    "extra": [],
+    "arm_env": {
+      "XEND_ARCHITECT_MIN_FILES": "1"
+    }
+  },
+  "arms": [
+    {
+      "label": "solo-sonnet",
+      "kind": "baseline",
+      "model": "sonnet",
+      "mode": "plain"
+    },
+    {
+      "label": "plain-sonnet",
+      "kind": "xend",
+      "model": "sonnet",
+      "mode": "plain"
+    },
+    {
+      "label": "arch-sonnet",
+      "kind": "xend",
+      "model": "sonnet",
+      "mode": "architect"
+    },
+    {
+      "label": "solo-fable",
+      "kind": "baseline",
+      "model": "fable",
+      "mode": "plain"
+    },
+    {
+      "label": "arch-fable",
+      "kind": "xend",
+      "model": "fable",
+      "mode": "architect"
+    }
+  ],
+  "tasks": [
+    "project-brownfield-softdelete"
+  ],
+  "claude_version": "2.1.272 (Claude Code)",
+  "started": "2026-09-15T14:59:26.816Z"
+}

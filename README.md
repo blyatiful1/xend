@@ -41,7 +41,7 @@ Then, in a new session:
 | Build less | ponytail's lazy-senior-dev ladder (YAGNI, reuse what is here, stdlib, native feature, one line) injected at SessionStart; xend defers to the upstream ponytail plugin when one is installed | session block, `/xend:ponytail` |
 | Read less | deterministic, recoverable shaping of tool results: escape codes, progress bars, repeated lines, passing-test rows and install chatter removed; very long generic output cut to head and tail with the original saved and named; byte-identical command re-runs shortened; grep/glob lists capped with truthful totals | PostToolUse hook (`updatedToolOutput`) |
 | Delegate | `xend-scout` (Haiku, citations only), `xend-reader` (Haiku, condense one artifact), `xend-worker` (Sonnet), `xend-worker-lite` (Haiku, one mechanical fully-specified change), `xend-reviewer` (Sonnet), and a routing rule: accept a cheaper model's output only after verifying it | `agents/`, `/xend:route` |
-| Plan, then build cheaply | the main model writes a plan through a small CLI; Haiku/Sonnet builders implement each task in disposable contexts; a deterministic SubagentStop hook re-runs every builder's verify command and sends false claims back for restatement; a PreToolUse gate refuses direct edits above the file floor until a plan exists | `/xend:plan`, session block, `scripts/subagent-stop.js`, `scripts/pre-edit-gate.js` |
+| Plan, then build cheaply | Opt-in. The main model writes a plan through a small CLI; Haiku/Sonnet builders implement each task in disposable contexts; a deterministic SubagentStop hook re-runs every builder's verify command and sends false claims back for restatement; a PreToolUse gate refuses direct edits above the file floor until a plan exists | `/xend:plan`, session block, `scripts/subagent-stop.js`, `scripts/pre-edit-gate.js` |
 | Reset cheaply | a checkpoint (edited files, verification commands, decisions) written before compaction and re-injected after `/compact` or `/clear`, so `/clear` becomes the default way to end a task | PreCompact hook, `/xend:checkpoint` |
 | Native levers | prompt-cache TTL, Bash output cap, MCP output cap, a `# Compact instructions` section, and (aggressive) Anthropic's server-side clearing of old tool results | `/xend:setup` |
 
@@ -51,9 +51,9 @@ What xend never does: rewrite your prompts, rewrite memory files into telegraphi
 
 | Profile | Adds | Use when |
 |---|---|---|
-| `lite` | terse `lite`, noise-only output cleanup, repeat shortening, audits, plus lean `lite` (xend's adapted ruleset); architect mode off | you want a conservative start and your own numbers first |
-| `balanced` (default) | terse `full`, structured shaping (tests, installs, long generic output), delegation, checkpoints, plus lean `full` (xend's adapted ruleset); architect mode on | everyday work |
-| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental), plus lean `full` (adapted text; set `XEND_PONYTAIL_TEXT=upstream` for the upstream-verbatim ruleset JetBrains measured, ~1,400 tokens more per session); architect mode on | long sessions; validate with the bench first |
+| `lite` | terse `lite`, noise-only output cleanup, repeat shortening, audits, plus lean `lite` (xend's adapted ruleset) | you want a conservative start and your own numbers first |
+| `balanced` (default) | terse `full`, structured shaping (tests, installs, long generic output), delegation, checkpoints, plus lean `full` (xend's adapted ruleset); architect mode is opt-in (`/xend:plan on`) | everyday work |
+| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental), plus lean `full` (adapted text; set `XEND_PONYTAIL_TEXT=upstream` for the upstream-verbatim ruleset JetBrains measured, ~1,400 tokens more per session) | long sessions; validate with the bench first |
 
 Switch with `/xend:profile <name>` or a `.xend.json` in the repo. Every transform has a kill switch (`XEND_SHAPE_TESTRUNNERS=0`, `XEND_TERSE=off`, ...). Details: `docs/PROFILES.md`.
 
