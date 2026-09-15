@@ -37,6 +37,24 @@ test('XEND_ARCHITECT_MIN_FILES overrides architect.minFiles; invalid values are 
   }
 });
 
+test('config: architect.defaultTier is "lite" in every profile; XEND_ARCHITECT_TIER sets forceTier and is absent by default', () => {
+  for (const profileEnv of [{}, { XEND_PROFILE: 'lite' }, { XEND_PROFILE: 'aggressive' }]) {
+    const cfg = config.resolve({ env: profileEnv, cwd: os.tmpdir() });
+    assert.strictEqual(cfg.architect.defaultTier, 'lite', JSON.stringify(profileEnv));
+    assert.strictEqual(cfg.architect.forceTier, undefined, JSON.stringify(profileEnv));
+  }
+
+  const forcedLite = config.resolve({ env: { XEND_ARCHITECT_TIER: 'lite' }, cwd: os.tmpdir() });
+  assert.strictEqual(forcedLite.architect.forceTier, 'lite');
+  const forcedWorker = config.resolve({ env: { XEND_ARCHITECT_TIER: 'worker' }, cwd: os.tmpdir() });
+  assert.strictEqual(forcedWorker.architect.forceTier, 'worker');
+  // rest of the architect shape survives
+  assert.strictEqual(forcedWorker.architect.defaultTier, 'lite');
+
+  const bogus = config.resolve({ env: { XEND_ARCHITECT_TIER: 'bogus' }, cwd: os.tmpdir() });
+  assert.strictEqual(bogus.architect.forceTier, undefined);
+});
+
 test('project .xend.json overrides profile defaults and can switch profile', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-cfg-'));
   const sub = path.join(dir, 'a', 'b');

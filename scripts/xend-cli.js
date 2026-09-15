@@ -127,7 +127,10 @@ function planCommand(sub, args, cwd) {
       try { input = JSON.parse(raw); } catch (e) { console.log('invalid JSON: ' + e.message); process.exitCode = 1; return; }
       const v = plan.validate(input);
       if (!v.ok) { v.errors.forEach((e) => console.log(e)); process.exitCode = 1; return; }
-      const p = plan.normalize(input);
+      const cachedCfg = state.readJson(path.join(dir, 'config.json'), null);
+      const cfg = cachedCfg || config.resolve({ cwd });
+      const arch = cfg.architect || {};
+      const p = plan.normalize(input, { defaultTier: arch.defaultTier, forceTier: arch.forceTier });
       plan.save(dir, p);
       console.log('plan: ' + p.tasks.length + ' tasks, ' + plan.ready(p).length + ' ready');
       for (const t of p.tasks) {
@@ -139,6 +142,7 @@ function planCommand(sub, args, cwd) {
     case 'status': {
       const p = requirePlan(); if (!p) return;
       for (const line of plan.statusLines(p)) console.log(line);
+      if (p.forcedTier) console.log('tier forced: ' + p.forcedTier);
       sessionLine();
       return;
     }

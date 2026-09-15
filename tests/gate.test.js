@@ -96,7 +96,7 @@ test('(b) three prior distinct files + a new fourth: deny JSON, reason names the
   assert.ok(fs.existsSync(gateFile));
   const gateJson = JSON.parse(fs.readFileSync(gateFile, 'utf8'));
   assert.strictEqual(gateJson.denials, 1);
-  assert.deepStrictEqual(gateJson.files, [path.resolve(fourth)]);
+  assert.deepStrictEqual(gateJson.files, { [path.resolve(fourth)]: 1 });
 });
 
 test('(c) the file is already in edits.jsonl: no output', () => {
@@ -119,18 +119,79 @@ test('(d) a stubborn retry of the same file is denied again, up to gateMaxDenial
     assert.ok(out, 'denial #' + i + ' should have fired');
     const parsed = JSON.parse(out);
     assert.strictEqual(parsed.hookSpecificOutput.permissionDecision, 'deny');
+    // the same file every time: wording stays "the 4th file", never "another file"
+    assert.ok(parsed.hookSpecificOutput.permissionDecisionReason.includes('4th file'), 'denial #' + i);
     const gateJson = JSON.parse(fs.readFileSync(path.join(dir, 'gate.json'), 'utf8'));
     assert.strictEqual(gateJson.denials, i);
-    assert.strictEqual(gateJson.files.length, i);
-    assert.strictEqual(gateJson.files[i - 1], path.resolve(target));
+    assert.strictEqual(Object.keys(gateJson.files).length, 1);
+    assert.strictEqual(gateJson.files[path.resolve(target)], i);
   }
 
-  // the 4th attempt (denials already at the ceiling of 3) is let through
+  // the 4th attempt (that file's own denial count already at the ceiling of 3) is let through
   const fourthAttempt = runGate(input, { XEND_STATE_DIR: stateBase });
   assert.strictEqual(fourthAttempt.status, 0);
   assert.strictEqual((fourthAttempt.stdout || '').trim(), '');
   const gateJson = JSON.parse(fs.readFileSync(path.join(dir, 'gate.json'), 'utf8'));
-  assert.strictEqual(gateJson.denials, 3, 'the ceiling must not be exceeded');
+  assert.strictEqual(gateJson.denials, 3, 'the per-file ceiling must not be exceeded');
+  assert.strictEqual(gateJson.files[path.resolve(target)], 3);
+});
+
+test('(d2) the per-file cap is independent per file: two different new files above the floor are BOTH denied, and one reaching its own cap does not let the other through', () => {
+  const { cwd, stateBase, sessionId, dir } = setupSession('sess-d2', { edits: THREE_PRIOR });
+  const fileA = path.join(cwd, 'four.js');
+  const fileB = path.join(cwd, 'five.js');
+
+  // fileA: first file tried above the floor this session -> "the 4th file" wording
+  const resA = runGate(editInput(sessionId, cwd, fileA), { XEND_STATE_DIR: stateBase });
+  const parsedA = JSON.parse((resA.stdout || '').trim());
+  assert.strictEqual(parsedA.hookSpecificOutput.permissionDecision, 'deny');
+  assert.ok(parsedA.hookSpecificOutput.permissionDecisionReason.includes('4th file'), parsedA.hookSpecificOutput.permissionDecisionReason);
+
+  // fileB: a different file already tried above the floor exists -> "another file" wording
+  const resB = runGate(editInput(sessionId, cwd, fileB), { XEND_STATE_DIR: stateBase });
+  const parsedB = JSON.parse((resB.stdout || '').trim());
+  assert.strictEqual(parsedB.hookSpecificOutput.permissionDecision, 'deny');
+  assert.ok(parsedB.hookSpecificOutput.permissionDecisionReason.includes('another file edited directly above the floor'), parsedB.hookSpecificOutput.permissionDecisionReason);
+
+  let gateJson = JSON.parse(fs.readFileSync(path.join(dir, 'gate.json'), 'utf8'));
+  assert.strictEqual(gateJson.denials, 2);
+  assert.strictEqual(gateJson.files[path.resolve(fileA)], 1);
+  assert.strictEqual(gateJson.files[path.resolve(fileB)], 1);
+
+  // push fileA to its own cap (2 more denials = 3 total for A)
+  runGate(editInput(sessionId, cwd, fileA), { XEND_STATE_DIR: stateBase });
+  runGate(editInput(sessionId, cwd, fileA), { XEND_STATE_DIR: stateBase });
+  gateJson = JSON.parse(fs.readFileSync(path.join(dir, 'gate.json'), 'utf8'));
+  assert.strictEqual(gateJson.files[path.resolve(fileA)], 3);
+  assert.strictEqual(gateJson.files[path.resolve(fileB)], 1, 'fileB\'s count must not be touched by fileA\'s denials');
+
+  // fileA is now let through (its own cap reached)...
+  const resAAllowed = runGate(editInput(sessionId, cwd, fileA), { XEND_STATE_DIR: stateBase });
+  assert.strictEqual((resAAllowed.stdout || '').trim(), '', 'fileA should be allowed once its own cap is reached');
+
+  // ...but fileB is still denied: its own count (1) is still below the ceiling
+  const resBStillDenied = runGate(editInput(sessionId, cwd, fileB), { XEND_STATE_DIR: stateBase });
+  const parsedBStill = JSON.parse((resBStillDenied.stdout || '').trim());
+  assert.strictEqual(parsedBStill.hookSpecificOutput.permissionDecision, 'deny', 'fileB has its own independent cap, not yet reached');
+});
+
+test('(d3) accepts the old gate.json array shape on read, treating each listed path as one denial', () => {
+  const { cwd, stateBase, sessionId, dir } = setupSession('sess-d3', { edits: THREE_PRIOR });
+  const target = path.join(cwd, 'four.js');
+  // shape written by the pre-per-file-cap gate: one array entry per denial
+  fs.writeFileSync(path.join(dir, 'gate.json'), JSON.stringify({ denials: 1, files: [path.resolve(target)] }));
+
+  for (let i = 2; i <= 3; i++) {
+    const res = runGate(editInput(sessionId, cwd, target), { XEND_STATE_DIR: stateBase });
+    const out = (res.stdout || '').trim();
+    assert.ok(out, 'denial should still fire, attempt ' + i);
+    const gateJson = JSON.parse(fs.readFileSync(path.join(dir, 'gate.json'), 'utf8'));
+    assert.ok(!Array.isArray(gateJson.files), 'gate.json must be rewritten in the new object shape');
+    assert.strictEqual(gateJson.files[path.resolve(target)], i);
+  }
+  // the old shape's one entry counted as 1, so the 3rd call above reached the cap of 3: allowed now
+  const allowed = runGate(editInput(sessionId, cwd, target), { XEND_STATE_DIR: stateBase });
+  assert.strictEqual((allowed.stdout || '').trim(), '');
 });
 
 test('(e) plan.json present: no output', () => {

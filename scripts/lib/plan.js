@@ -3,6 +3,7 @@
 // section 5. No timestamps anywhere in this file: printed views must stay reproducible.
 const path = require('path');
 const state = require('./state.js');
+const verify = require('./verify.js');
 
 const PLAN_FILE = 'plan.json';
 const ID_RE = /^[A-Za-z][\w-]*$/;
@@ -115,20 +116,43 @@ function validate(input) {
     }
   }
 
+  // A verify command xend cannot safely re-run (outside scripts/lib/verify.js's allowlist) means
+  // the task or project will be recorded as unverified rather than actually checked; flagged at
+  // plan time so the architect can fix it before dispatching, not after (bench pilot: six tasks
+  // ended "done unverified" because a verify command like `cd /x && npm test` was refused).
+  const NOT_ALLOWLISTED_TAIL = 'xend cannot re-run this verify command (not on the allowlist: plain ' +
+    'pytest/unittest/npm test/node --test/go test/cargo test/make test/a test script/python3 -c ' +
+    '"import pkg.mod"; no cd, &&, |, ;); the task will be recorded as unverified';
+  if (isNonEmptyString(input.verify) && !verify.commandAllowed(input.verify)) {
+    warnings.push('project verify: ' + NOT_ALLOWLISTED_TAIL);
+  }
+  for (const t of input.tasks) {
+    if (t && isNonEmptyString(t.id) && isNonEmptyString(t.verify) && !verify.commandAllowed(t.verify)) {
+      warnings.push('task ' + t.id + ': ' + NOT_ALLOWLISTED_TAIL);
+    }
+  }
+
   return { ok: errors.length === 0, errors, warnings };
 }
 
 // --- runtime shape -------------------------------------------------------------
 
 // Caller must validate() first. Adds the runtime fields xend tracks per task.
-function normalize(input) {
+// opts.defaultTier: used when a task omits tier (default 'lite' when opts is absent or omits it —
+// lite builders handle a precise spec at Haiku prices; see docs/SPEC-architect.md section 2).
+// opts.forceTier: overrides every task's tier regardless of what it or defaultTier says, and is
+// recorded as plan.forcedTier so `plan status` can report it.
+function normalize(input, opts) {
+  opts = opts || {};
+  const defaultTier = opts.defaultTier || 'lite';
+  const forceTier = opts.forceTier;
   const plan = {
     goal: input.goal,
     verify: input.verify,
     tasks: input.tasks.map((t) => ({
       id: t.id,
       title: t.title,
-      tier: t.tier || 'worker',
+      tier: forceTier || t.tier || defaultTier,
       files: t.files.slice(),
       testFiles: isStringArray(t.testFiles) ? t.testFiles.slice() : [],
       deps: isStringArray(t.deps) ? t.deps.slice() : [],
@@ -142,6 +166,7 @@ function normalize(input) {
     })),
   };
   if (isNonEmptyString(input.conventions)) plan.conventions = input.conventions;
+  if (forceTier) plan.forcedTier = forceTier;
   return plan;
 }
 

@@ -108,6 +108,42 @@ test('validate: a single-task plan sharing the project verify only gets warning 
   ]);
 });
 
+// --- validate: verify commands xend cannot re-run (not on scripts/lib/verify.js's allowlist) ----
+
+test('validate: warns when the top-level verify is not on the allowlist ("project verify:")', () => {
+  const v = plan.validate({
+    goal: 'g', verify: 'cd /x && npm test',
+    tasks: [task({ verify: 'node --test a.test.js' })],
+  });
+  assert.strictEqual(v.ok, true);
+  assert.ok(v.warnings.some((w) => w.startsWith('project verify: xend cannot re-run this verify command')), v.warnings.join('; '));
+  assert.ok(v.warnings.some((w) => w.includes('not on the allowlist: plain pytest/unittest/npm test/node --test/go test/cargo test/make test/a test script/python3 -c "import pkg.mod"; no cd, &&, |, ;')), v.warnings.join('; '));
+  assert.ok(v.warnings.some((w) => w.includes('the task will be recorded as unverified')), v.warnings.join('; '));
+  // the allowlisted task verify must not itself warn
+  assert.ok(!v.warnings.some((w) => w.startsWith('task T1:') && w.includes('xend cannot re-run')), v.warnings.join('; '));
+});
+
+test('validate: warns per task whose own verify is not on the allowlist', () => {
+  const v = plan.validate({
+    goal: 'g', verify: 'npm test',
+    tasks: [
+      task({ id: 'T1', verify: 'cd /x && node --test a.test.js' }),
+      task({ id: 'T2', files: ['b.js'], verify: 'node --test b.test.js' }),
+    ],
+  });
+  assert.strictEqual(v.ok, true);
+  assert.ok(v.warnings.some((w) => w.startsWith('task T1: xend cannot re-run this verify command')), v.warnings.join('; '));
+  assert.ok(!v.warnings.some((w) => w.startsWith('task T2:') && w.includes('xend cannot re-run')), v.warnings.join('; '));
+});
+
+test('validate: a fully allowlisted plan gets no "xend cannot re-run" warnings', () => {
+  const v = plan.validate({
+    goal: 'g', verify: 'npm test -- everything',
+    tasks: [task({ verify: 'node --test a.test.js' })],
+  });
+  assert.ok(!v.warnings.some((w) => w.includes('xend cannot re-run')), v.warnings.join('; '));
+});
+
 test('normalize: adds runtime fields, defaults tier/deps/testFiles', () => {
   const p = plan.normalize({ goal: 'g', verify: 'npm test', tasks: [task({})] });
   assert.strictEqual(p.tasks[0].status, 'todo');
@@ -115,9 +151,41 @@ test('normalize: adds runtime fields, defaults tier/deps/testFiles', () => {
   assert.strictEqual(p.tasks[0].verified, false);
   assert.strictEqual(p.tasks[0].lastVerdict, '');
   assert.deepStrictEqual(p.tasks[0].scopeWarnings, []);
-  assert.strictEqual(p.tasks[0].tier, 'worker'); // default
+  assert.strictEqual(p.tasks[0].tier, 'lite'); // default: lite (a precise spec is enough at Haiku prices)
   assert.deepStrictEqual(p.tasks[0].deps, []);
   assert.deepStrictEqual(p.tasks[0].testFiles, []);
+  assert.strictEqual(p.forcedTier, undefined);
+});
+
+// --- normalize: tier defaulting, explicit tier, and forceTier (SPEC-architect.md section 2/5) --
+
+test('normalize: opts.defaultTier is used when a task omits tier; default is "lite" when opts is absent', () => {
+  const noOpts = plan.normalize({ goal: 'g', verify: 'v', tasks: [task({})] });
+  assert.strictEqual(noOpts.tasks[0].tier, 'lite');
+
+  const emptyOpts = plan.normalize({ goal: 'g', verify: 'v', tasks: [task({})] }, {});
+  assert.strictEqual(emptyOpts.tasks[0].tier, 'lite');
+
+  const explicitDefault = plan.normalize({ goal: 'g', verify: 'v', tasks: [task({})] }, { defaultTier: 'worker' });
+  assert.strictEqual(explicitDefault.tasks[0].tier, 'worker');
+});
+
+test('normalize: a task\'s own explicit tier wins over opts.defaultTier', () => {
+  const p = plan.normalize({ goal: 'g', verify: 'v', tasks: [task({ tier: 'worker' })] }, { defaultTier: 'lite' });
+  assert.strictEqual(p.tasks[0].tier, 'worker');
+});
+
+test('normalize: opts.forceTier overrides every task\'s tier (explicit or defaulted) and records plan.forcedTier', () => {
+  const p = plan.normalize({
+    goal: 'g', verify: 'v',
+    tasks: [task({ id: 'T1', tier: 'worker' }), task({ id: 'T2', files: ['b.js'] })],
+  }, { defaultTier: 'lite', forceTier: 'worker' });
+  assert.strictEqual(p.tasks[0].tier, 'worker');
+  assert.strictEqual(p.tasks[1].tier, 'worker');
+  assert.strictEqual(p.forcedTier, 'worker');
+
+  const noForce = plan.normalize({ goal: 'g', verify: 'v', tasks: [task({})] }, { defaultTier: 'lite' });
+  assert.strictEqual(noForce.forcedTier, undefined);
 });
 
 test('save/load round-trips through an atomic write', () => {

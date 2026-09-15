@@ -38,7 +38,7 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
-    architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
+    architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
   balanced: {
     profile: 'balanced',
@@ -69,7 +69,7 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
-    architect: { enabled: true, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
+    architect: { enabled: true, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
   aggressive: {
     profile: 'aggressive',
@@ -100,7 +100,7 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
-    architect: { enabled: true, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
+    architect: { enabled: true, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
 };
 
@@ -175,6 +175,9 @@ function envOverrides(env) {
   if (env.XEND_ARCHITECT_MIN_FILES !== undefined) {
     const n = Number(env.XEND_ARCHITECT_MIN_FILES);
     if (Number.isInteger(n) && n >= 1) o.architect = Object.assign({}, o.architect, { minFiles: n });
+  }
+  if (env.XEND_ARCHITECT_TIER === 'lite' || env.XEND_ARCHITECT_TIER === 'worker') {
+    o.architect = Object.assign({}, o.architect, { forceTier: env.XEND_ARCHITECT_TIER });
   }
   return o;
 }
