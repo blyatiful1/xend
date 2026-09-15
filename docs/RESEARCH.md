@@ -130,9 +130,9 @@ the verbatim text and xend's three `[xend]` reconciliation tags). → Status: **
 which has not been run: the pre-registered promotion rule is PROMOTE only when the one-sided 95%
 bounds satisfy Δcost ≤ +3.0%, Δpass ≥ -3.0 pp and Δturns ≤ +0.25; anything else demotes the feature
 to opt-in on `lite` and `balanced`, and a pass-rate or turn regression turns it off everywhere.
-`aggressive` keeps `ponytailText: upstream` only if `pony-upstream` clears the same three
-thresholds; the JetBrains number alone does not earn it, because it was measured on a different,
-longer task distribution.
+Outcome of that gate (runs r4 and r5): the adapted text stays on in every profile (within noise of
+no ponytail); the upstream-verbatim text failed the cost threshold (+16.7%) and is opt-in everywhere,
+because the JetBrains number was measured on a different, longer task distribution.
 
 ## 4. Rejected or deferred
 
@@ -146,7 +146,7 @@ longer task distribution.
 | Replace a large Read result with a synthesized outline | A heuristic outline misses definitions (decorated methods, re-exports, `const f = () =>`) and the model reads a missing symbol as absent; it also makes the Read shape incoherent. Removed after review. |
 | The caveman skill, vendored verbatim | xend's terse block **already is that style** (it descends from caveman and is credited as such), so a second copy is pure prefix tax; ponytail's own Boundaries section names caveman as its prose partner, and that role is already filled. Deliberately not vendored. |
 | ponytail as an on-demand skill | JetBrains: "it will self-activate zero times." An on-demand copy costs ~206 tokens of skill-index description in every session and does nothing. The verbatim file is vendored under `vendor/ponytail/`, which Claude Code does not scan, so it costs zero tokens. |
-| Injecting the upstream-verbatim ponytail text by default on every profile | 1,382 tokens per session against xend's own measured ~0.8% cost per 100 tokens of prefix on five-turn tasks: ~+11.5% predicted, more than the whole effect JetBrains measured. Available behind `ponytailText: 'upstream'`, default only on `aggressive`, and benchable. |
+| Injecting the upstream-verbatim ponytail text by default on every profile | 1,382 tokens per session against xend's own measured ~0.8% cost per 100 tokens of prefix on five-turn tasks: ~+11.5% predicted, more than the whole effect JetBrains measured. Available behind `ponytailText: 'upstream'` (opt-in in every profile after bench r5 measured +16.7%) and benchable. |
 | Porting ponytail's `SubagentStart` hook | It would add ~1,382 tokens to every `xend-scout` and `xend-reader` call — Haiku subagents whose entire purpose is to be cheap — and would extend beyond what JetBrains measured, which was main-session injection only. |
 | Minify JSON in tool output | Unmeasured token effect (pretty JSON tokenizes cheaply) and a real correctness risk: an `Edit` after `cat file.json` must match the pretty-printed file on disk. Removed from all profiles. |
 | Shorten repeated `Read` results | A Read is the model's working copy; hiding it invites an `Edit` from memory. Dedupe is Bash-only. |
