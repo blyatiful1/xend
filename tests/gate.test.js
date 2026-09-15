@@ -60,26 +60,23 @@ function editInput(sessionId, cwd, filePath, extra) {
   }, extra);
 }
 
-test('(a) zero or one prior distinct files: no output', () => {
-  const { cwd, stateBase, sessionId, dir } = setupSession('sess-a1', {});
-  // zero prior edits
-  let res = runGate(editInput(sessionId, cwd, path.join(cwd, 'one.js')), { XEND_STATE_DIR: stateBase });
-  assert.strictEqual(res.status, 0);
-  assert.strictEqual((res.stdout || '').trim(), '');
-  assert.ok(!fs.existsSync(path.join(dir, 'gate.json')));
+// Three prior distinct files is the floor for the default minFiles: 4 (minFiles - 1 = 3).
+const THREE_PRIOR = ['/abs/one.js', '/abs/two.js', '/abs/three.js'];
 
-  // one prior distinct edit
-  const { cwd: cwd2, stateBase: stateBase2, sessionId: sid2, dir: dir2 } = setupSession('sess-a2', { edits: ['/abs/one.js'] });
-  res = runGate(editInput(sid2, cwd2, path.join(cwd2, 'two.js')), { XEND_STATE_DIR: stateBase2 });
-  assert.strictEqual(res.status, 0);
-  assert.strictEqual((res.stdout || '').trim(), '');
-  assert.ok(!fs.existsSync(path.join(dir2, 'gate.json')));
+test('(a) fewer than minFiles-1 (3) prior distinct files: no output, for 0, 1 and 2', () => {
+  for (const prior of [[], ['/abs/one.js'], ['/abs/one.js', '/abs/two.js']]) {
+    const { cwd, stateBase, sessionId, dir } = setupSession('sess-a-' + prior.length, { edits: prior });
+    const res = runGate(editInput(sessionId, cwd, path.join(cwd, 'new.js')), { XEND_STATE_DIR: stateBase });
+    assert.strictEqual(res.status, 0);
+    assert.strictEqual((res.stdout || '').trim(), '', 'prior=' + prior.length);
+    assert.ok(!fs.existsSync(path.join(dir, 'gate.json')), 'prior=' + prior.length);
+  }
 });
 
-test('(b) two prior distinct files + a new third: deny JSON, reason names plan set and plan off, gate.json written', () => {
-  const { cwd, stateBase, sessionId, dir } = setupSession('sess-b', { edits: ['/abs/one.js', '/abs/two.js'] });
-  const third = path.join(cwd, 'three.js');
-  const res = runGate(editInput(sessionId, cwd, third), { XEND_STATE_DIR: stateBase });
+test('(b) three prior distinct files + a new fourth: deny JSON, reason names the 4th file and omits `plan off`, gate.json records one denial', () => {
+  const { cwd, stateBase, sessionId, dir } = setupSession('sess-b', { edits: THREE_PRIOR });
+  const fourth = path.join(cwd, 'four.js');
+  const res = runGate(editInput(sessionId, cwd, fourth), { XEND_STATE_DIR: stateBase });
   assert.strictEqual(res.status, 0);
   const out = (res.stdout || '').trim();
   assert.ok(out, 'expected deny output, got nothing: ' + res.stderr);
@@ -87,101 +84,116 @@ test('(b) two prior distinct files + a new third: deny JSON, reason names plan s
   assert.strictEqual(parsed.hookSpecificOutput.hookEventName, 'PreToolUse');
   assert.strictEqual(parsed.hookSpecificOutput.permissionDecision, 'deny');
   const reason = parsed.hookSpecificOutput.permissionDecisionReason;
+  assert.ok(reason.includes('4th file'), reason);
   assert.ok(reason.includes('plan set'), reason);
-  assert.ok(reason.includes('plan off'), reason);
+  assert.ok(reason.includes('plan next'), reason);
+  assert.ok(!reason.includes('plan off'), reason);
+  assert.ok(!/disable/i.test(reason), reason);
 
   const gateFile = path.join(dir, 'gate.json');
   assert.ok(fs.existsSync(gateFile));
   const gateJson = JSON.parse(fs.readFileSync(gateFile, 'utf8'));
-  assert.strictEqual(gateJson.fired, true);
-  assert.strictEqual(gateJson.file, path.resolve(third));
+  assert.strictEqual(gateJson.denials, 1);
+  assert.deepStrictEqual(gateJson.files, [path.resolve(fourth)]);
 });
 
-test('(c) same as (b) but the file is one of the two already edited: no output', () => {
-  const already = '/abs/one.js';
-  const { cwd, stateBase, sessionId, dir } = setupSession('sess-c', { edits: [already, '/abs/two.js'] });
+test('(c) the file is already in edits.jsonl: no output', () => {
+  const already = THREE_PRIOR[0];
+  const { cwd, stateBase, sessionId, dir } = setupSession('sess-c', { edits: THREE_PRIOR });
   const res = runGate(editInput(sessionId, cwd, already), { XEND_STATE_DIR: stateBase });
   assert.strictEqual(res.status, 0);
   assert.strictEqual((res.stdout || '').trim(), '');
   assert.ok(!fs.existsSync(path.join(dir, 'gate.json')));
 });
 
-test('(d) run (b) twice: the second run prints nothing', () => {
-  const { cwd, stateBase, sessionId, dir } = setupSession('sess-d', { edits: ['/abs/one.js', '/abs/two.js'] });
-  const third = path.join(cwd, 'three.js');
-  const first = runGate(editInput(sessionId, cwd, third), { XEND_STATE_DIR: stateBase });
-  assert.ok((first.stdout || '').trim(), 'first run should deny');
-  assert.ok(fs.existsSync(path.join(dir, 'gate.json')));
+test('(d) a stubborn retry of the same file is denied again, up to gateMaxDenials (3), then allowed', () => {
+  const { cwd, stateBase, sessionId, dir } = setupSession('sess-d', { edits: THREE_PRIOR });
+  const target = path.join(cwd, 'four.js');
+  const input = editInput(sessionId, cwd, target);
 
-  const fourth = path.join(cwd, 'four.js');
-  const second = runGate(editInput(sessionId, cwd, fourth), { XEND_STATE_DIR: stateBase });
-  assert.strictEqual(second.status, 0);
-  assert.strictEqual((second.stdout || '').trim(), '');
+  for (let i = 1; i <= 3; i++) {
+    const res = runGate(input, { XEND_STATE_DIR: stateBase });
+    const out = (res.stdout || '').trim();
+    assert.ok(out, 'denial #' + i + ' should have fired');
+    const parsed = JSON.parse(out);
+    assert.strictEqual(parsed.hookSpecificOutput.permissionDecision, 'deny');
+    const gateJson = JSON.parse(fs.readFileSync(path.join(dir, 'gate.json'), 'utf8'));
+    assert.strictEqual(gateJson.denials, i);
+    assert.strictEqual(gateJson.files.length, i);
+    assert.strictEqual(gateJson.files[i - 1], path.resolve(target));
+  }
+
+  // the 4th attempt (denials already at the ceiling of 3) is let through
+  const fourthAttempt = runGate(input, { XEND_STATE_DIR: stateBase });
+  assert.strictEqual(fourthAttempt.status, 0);
+  assert.strictEqual((fourthAttempt.stdout || '').trim(), '');
+  const gateJson = JSON.parse(fs.readFileSync(path.join(dir, 'gate.json'), 'utf8'));
+  assert.strictEqual(gateJson.denials, 3, 'the ceiling must not be exceeded');
 });
 
 test('(e) plan.json present: no output', () => {
-  const { cwd, stateBase, sessionId, dir } = setupSession('sess-e', { edits: ['/abs/one.js', '/abs/two.js'] });
+  const { cwd, stateBase, sessionId, dir } = setupSession('sess-e', { edits: THREE_PRIOR });
   fs.writeFileSync(path.join(dir, 'plan.json'), JSON.stringify({ goal: 'g', verify: 'npm test', tasks: [] }));
-  const third = path.join(cwd, 'three.js');
-  const res = runGate(editInput(sessionId, cwd, third), { XEND_STATE_DIR: stateBase });
+  const fourth = path.join(cwd, 'four.js');
+  const res = runGate(editInput(sessionId, cwd, fourth), { XEND_STATE_DIR: stateBase });
   assert.strictEqual(res.status, 0);
   assert.strictEqual((res.stdout || '').trim(), '');
   assert.ok(!fs.existsSync(path.join(dir, 'gate.json')));
 });
 
 test('(f) agent_id present (inside a subagent): no output', () => {
-  const { cwd, stateBase, sessionId, dir } = setupSession('sess-f', { edits: ['/abs/one.js', '/abs/two.js'] });
-  const third = path.join(cwd, 'three.js');
-  const res = runGate(editInput(sessionId, cwd, third, { agent_id: 'agent-1' }), { XEND_STATE_DIR: stateBase });
+  const { cwd, stateBase, sessionId, dir } = setupSession('sess-f', { edits: THREE_PRIOR });
+  const fourth = path.join(cwd, 'four.js');
+  const res = runGate(editInput(sessionId, cwd, fourth, { agent_id: 'agent-1' }), { XEND_STATE_DIR: stateBase });
   assert.strictEqual(res.status, 0);
   assert.strictEqual((res.stdout || '').trim(), '');
   assert.ok(!fs.existsSync(path.join(dir, 'gate.json')));
 });
 
-test('(g) session override architect=false: no output', () => {
-  const { cwd, stateBase, sessionId, dir } = setupSession('sess-g', { edits: ['/abs/one.js', '/abs/two.js'] });
+test('(g) session override architect=false ("disabled"): no output', () => {
+  const { cwd, stateBase, sessionId, dir } = setupSession('sess-g', { edits: THREE_PRIOR });
   state.setSessionOverride(dir, 'architect', false);
-  const third = path.join(cwd, 'three.js');
-  const res = runGate(editInput(sessionId, cwd, third), { XEND_STATE_DIR: stateBase });
+  const fourth = path.join(cwd, 'four.js');
+  const res = runGate(editInput(sessionId, cwd, fourth), { XEND_STATE_DIR: stateBase });
   assert.strictEqual(res.status, 0);
   assert.strictEqual((res.stdout || '').trim(), '');
   assert.ok(!fs.existsSync(path.join(dir, 'gate.json')));
 });
 
-test('(h) XEND_ARCHITECT_GATE=0 baked into the cached config: no output', () => {
+test('(h) XEND_ARCHITECT_GATE=0 baked into the cached config ("disabled"): no output', () => {
   const { cwd, stateBase, sessionId, dir } = setupSession('sess-h', {
-    edits: ['/abs/one.js', '/abs/two.js'],
+    edits: THREE_PRIOR,
     configEnv: { XEND_ARCHITECT_GATE: '0' },
   });
   const cached = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
   assert.strictEqual(cached.architect.enabled, true); // architect itself stays on
   assert.strictEqual(cached.architect.gate, false);    // only the gate is disabled
-  const third = path.join(cwd, 'three.js');
-  const res = runGate(editInput(sessionId, cwd, third), { XEND_STATE_DIR: stateBase });
+  const fourth = path.join(cwd, 'four.js');
+  const res = runGate(editInput(sessionId, cwd, fourth), { XEND_STATE_DIR: stateBase });
   assert.strictEqual(res.status, 0);
   assert.strictEqual((res.stdout || '').trim(), '');
   assert.ok(!fs.existsSync(path.join(dir, 'gate.json')));
 });
 
 test('(i) `plan off` via the CLI clears the way: no output, and a lingering gate.json is removed', () => {
-  const { cwd, stateBase, sessionId, dir } = setupSession('sess-i', { edits: ['/abs/one.js', '/abs/two.js'] });
-  // simulate a gate that already fired earlier this session
-  fs.writeFileSync(path.join(dir, 'gate.json'), JSON.stringify({ fired: true, file: '/abs/whatever.js' }));
+  const { cwd, stateBase, sessionId, dir } = setupSession('sess-i', { edits: THREE_PRIOR });
+  // simulate a gate that already denied twice earlier this session
+  fs.writeFileSync(path.join(dir, 'gate.json'), JSON.stringify({ denials: 2, files: ['/abs/whatever.js', '/abs/other.js'] }));
 
   const off = runCli(['plan', 'off', '--session', sessionId], { XEND_STATE_DIR: stateBase });
   assert.strictEqual(off.status, 0, off.stderr);
   assert.ok((off.stdout || '').includes('architect mode off for this session; direct edits allowed'), off.stdout);
   assert.ok(!fs.existsSync(path.join(dir, 'gate.json')), 'plan off must delete a lingering gate.json');
 
-  const third = path.join(cwd, 'three.js');
-  const res = runGate(editInput(sessionId, cwd, third), { XEND_STATE_DIR: stateBase });
+  const fourth = path.join(cwd, 'four.js');
+  const res = runGate(editInput(sessionId, cwd, fourth), { XEND_STATE_DIR: stateBase });
   assert.strictEqual(res.status, 0);
   assert.strictEqual((res.stdout || '').trim(), '');
   assert.ok(!fs.existsSync(path.join(dir, 'gate.json')));
 });
 
-test('`plan on` clears the session override so the gate can fire again', () => {
-  const { cwd, stateBase, sessionId, dir } = setupSession('sess-on', { edits: ['/abs/one.js', '/abs/two.js'] });
+test('`plan on` clears the session override so the gate can fire again (fresh denial count)', () => {
+  const { cwd, stateBase, sessionId, dir } = setupSession('sess-on', { edits: THREE_PRIOR });
   const offCli = runCli(['plan', 'off', '--session', sessionId], { XEND_STATE_DIR: stateBase });
   assert.strictEqual(offCli.status, 0, offCli.stderr);
 
@@ -189,13 +201,14 @@ test('`plan on` clears the session override so the gate can fire again', () => {
   assert.strictEqual(onCli.status, 0, onCli.stderr);
   assert.ok((onCli.stdout || '').includes('architect mode on for this session'), onCli.stdout);
 
-  const third = path.join(cwd, 'three.js');
-  const res = runGate(editInput(sessionId, cwd, third), { XEND_STATE_DIR: stateBase });
-  assert.strictEqual(res.status, 0);
+  const fourth = path.join(cwd, 'four.js');
+  const res = runGate(editInput(sessionId, cwd, fourth), { XEND_STATE_DIR: stateBase });
   const out = (res.stdout || '').trim();
   assert.ok(out, 'expected the gate to fire again once architect is back on');
   const parsed = JSON.parse(out);
   assert.strictEqual(parsed.hookSpecificOutput.permissionDecision, 'deny');
+  const gateJson = JSON.parse(fs.readFileSync(path.join(dir, 'gate.json'), 'utf8'));
+  assert.strictEqual(gateJson.denials, 1, 'denial count restarts fresh (plan off deleted the old gate.json)');
 });
 
 // --- context.build: the gate sentence --------------------------------------------------------
@@ -203,12 +216,12 @@ test('`plan on` clears the session override so the gate can fire again', () => {
 test('context.build includes the gate sentence when architect.gate !== false, omits it when false', () => {
   const cfg = config.resolve({ env: {}, cwd: os.tmpdir() }); // balanced: architect enabled, gate true
   const on = context.build(cfg, { cliPath: '/abs/path/to/xend-cli.js' });
-  assert.ok(on.includes('xend refuses the third direct file edit without a plan, once.'), on);
+  assert.ok(on.includes('Above three files edited directly, xend refuses further direct edits until a plan exists.'), on);
 
   const gateOff = context.build(Object.assign({}, cfg, { architect: Object.assign({}, cfg.architect, { gate: false }) }), { cliPath: '/abs/path/to/xend-cli.js' });
   assert.ok(gateOff.includes('Architect mode:'), gateOff); // architect mode itself still on
-  assert.ok(!gateOff.includes('xend refuses the third direct file edit without a plan, once.'), gateOff);
+  assert.ok(!gateOff.includes('Above three files edited directly'), gateOff);
 
   const archOff = context.build(Object.assign({}, cfg, { architect: { enabled: false } }), { cliPath: '/abs/path/to/xend-cli.js' });
-  assert.ok(!archOff.includes('xend refuses the third direct file edit without a plan, once.'), archOff);
+  assert.ok(!archOff.includes('Above three files edited directly'), archOff);
 });
