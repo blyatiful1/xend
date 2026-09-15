@@ -8,12 +8,22 @@
 //   node xend-cli.js profile [name]               print or set the user-level profile
 //   node xend-cli.js note <session-id> <text...>  append a note to the session checkpoint
 //   node xend-cli.js ponytail <session-id> [arg]  switch the lean level, or 'rules' / 'status'
+//   node xend-cli.js outline <file> [--max N]     print a heuristic outline of a file
+//   node xend-cli.js plan <sub> [args] [--session <id>] [--file <path>]
+//       set               validate + write a plan (JSON via --file or stdin)
+//       status            print per-task status, the verify command, scope warnings
+//       next [--peek]     print ready briefs to dispatch; --peek: no state change
+//       brief <id>        print one task's brief
+//       done <id> PASS|FAIL [note]   record a manual verdict
+//       reset <id>        back to todo (attempts kept)
+//       show              print the raw plan JSON
 const fs = require('fs');
 const path = require('path');
 const config = require('./lib/config.js');
 const state = require('./lib/state.js');
 const context = require('./lib/context.js');
 const ponytail = require('./lib/ponytail.js');
+const plan = require('./lib/plan.js');
 
 function arg(name) { const i = process.argv.indexOf(name); return i !== -1 ? process.argv[i + 1] : undefined; }
 
@@ -78,6 +88,112 @@ function ponytailCommand(sid, want, cwd) {
   console.log(parts.parts.join('\n\n'));
 }
 
+function parsePlanArgs(args) {
+  const out = { session: undefined, file: undefined, peek: false, positional: [] };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--session') out.session = args[++i];
+    else if (a === '--file') out.file = args[++i];
+    else if (a === '--peek') out.peek = true;
+    else out.positional.push(a);
+  }
+  return out;
+}
+
+function planCommand(sub, args, cwd) {
+  const { session, file, peek, positional } = parsePlanArgs(args);
+  const resolved = state.resolveSessionDir({ session, env: process.env, cwd });
+  if (!resolved.dir) {
+    console.log('no session found: pass --session <id>, or run this from a session xend has seen start');
+    process.exitCode = 1;
+    return;
+  }
+  const dir = resolved.dir;
+  const sessionLine = () => { if (resolved.source !== 'arg') console.log('session: ' + resolved.id + ' (' + resolved.source + ')'); };
+  const requirePlan = () => {
+    const p = plan.load(dir);
+    if (!p) { console.log('no plan set for this session'); process.exitCode = 1; }
+    return p;
+  };
+  switch (sub) {
+    case 'set': {
+      let raw;
+      try { raw = file ? fs.readFileSync(file, 'utf8') : fs.readFileSync(0, 'utf8'); }
+      catch (e) { console.log('could not read plan input: ' + e.message); process.exitCode = 1; return; }
+      let input;
+      try { input = JSON.parse(raw); } catch (e) { console.log('invalid JSON: ' + e.message); process.exitCode = 1; return; }
+      const v = plan.validate(input);
+      if (!v.ok) { v.errors.forEach((e) => console.log(e)); process.exitCode = 1; return; }
+      const p = plan.normalize(input);
+      plan.save(dir, p);
+      console.log('plan: ' + p.tasks.length + ' tasks, ' + plan.ready(p).length + ' ready');
+      for (const t of p.tasks) {
+        console.log(t.id + ' [' + t.tier + '] ' + t.title + ' — files: ' + t.files.join(', ') + ' — deps: ' + (t.deps.length ? t.deps.join(', ') : 'none'));
+      }
+      return;
+    }
+    case 'status': {
+      const p = requirePlan(); if (!p) return;
+      for (const line of plan.statusLines(p)) console.log(line);
+      sessionLine();
+      return;
+    }
+    case 'next': {
+      const p = requirePlan(); if (!p) return;
+      const result = plan.next(p, { peek });
+      if (!peek) plan.save(dir, p);
+      if (!result.dispatch.length && !result.self.length) {
+        console.log(result.complete ? 'plan complete' : 'no ready tasks');
+        return;
+      }
+      for (const d of result.dispatch) {
+        console.log('subagent_type: ' + d.subagentType);
+        console.log(d.brief);
+        console.log('');
+      }
+      if (result.self.length) {
+        console.log('do yourself:');
+        for (const t of result.self) console.log(t.id + ': ' + (t.lastVerdict || t.title));
+      }
+      return;
+    }
+    case 'brief': {
+      const p = requirePlan(); if (!p) return;
+      const id = positional[0];
+      const task = p.tasks.find((t) => t.id === id);
+      if (!task) { console.log('unknown task: ' + id); process.exitCode = 1; return; }
+      console.log(plan.brief(p, task));
+      return;
+    }
+    case 'done': {
+      const p = requirePlan(); if (!p) return;
+      const [id, verdict, ...noteParts] = positional;
+      const res = plan.markDone(p, id, verdict, noteParts.join(' '));
+      if (!res.ok) { console.log(res.error); process.exitCode = 1; return; }
+      plan.save(dir, p);
+      console.log(plan.taskStatusLine(p, res.task));
+      return;
+    }
+    case 'reset': {
+      const p = requirePlan(); if (!p) return;
+      const id = positional[0];
+      const task = plan.reset(p, id);
+      if (!task) { console.log('unknown task: ' + id); process.exitCode = 1; return; }
+      plan.save(dir, p);
+      console.log(plan.taskStatusLine(p, task));
+      return;
+    }
+    case 'show': {
+      const p = requirePlan(); if (!p) return;
+      console.log(JSON.stringify(p, null, 2));
+      return;
+    }
+    default:
+      console.log('usage: xend-cli.js plan set|status|next|brief|done|reset|show');
+      process.exitCode = 1;
+  }
+}
+
 function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const cwd = arg('--cwd') || process.cwd();
@@ -89,7 +205,7 @@ function main() {
     }
     case 'context': {
       const cfg = config.resolve({ cwd });
-      console.log(context.build(cfg, {}));
+      console.log(context.build(cfg, { cliPath: __filename }));
       return;
     }
     case 'state-dir': {
@@ -126,6 +242,11 @@ function main() {
       ponytailCommand(sid, String(rawArg || 'status').toLowerCase(), cwd);
       return;
     }
+    case 'plan': {
+      const [sub, ...planArgs] = rest;
+      planCommand(sub, planArgs, cwd);
+      return;
+    }
     case 'profile': {
       const file = config.userConfigPath();
       if (!rest[0]) {
@@ -154,7 +275,7 @@ function main() {
       return;
     }
     default:
-      console.log('usage: xend-cli.js config|context|state-dir|set|profile|note|ponytail');
+      console.log('usage: xend-cli.js config|context|state-dir|set|profile|note|ponytail|plan');
   }
 }
 

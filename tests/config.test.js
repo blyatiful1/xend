@@ -44,18 +44,24 @@ test('context block is stable and contains no timestamps', () => {
   assert.ok(a.includes('[xend]'));
 
   // Prefix regression guard: with no opts.ponytail the block is byte-identical to the
-  // pre-integration composition, so every existing caller and test is unaffected.
-  const preIntegration = [
-    'xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + ').',
+  // pre-integration composition, so every existing caller and test is unaffected. The default
+  // (balanced) profile has architect enabled, so that paragraph and header suffix are expected.
+  const archOn = cfg.architect && cfg.architect.enabled;
+  const preIntegrationParts = [
+    'xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + (archOn ? ', architect' : '') + ').',
     context.TERSE[cfg.terse], context.TERSE_EXEMPTIONS, context.READING, context.CONDENSED, context.DELEGATION,
-  ].join('\n\n');
+  ];
+  if (archOn) preIntegrationParts.push(context.architectText());
+  const preIntegration = preIntegrationParts.join('\n\n');
   assert.strictEqual(a, preIntegration, 'ponytail integration changed the base block');
   const offOpts = { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: 'adapted', strict: false } };
   assert.strictEqual(context.build(Object.assign({}, cfg, { ponytail: 'off' }), offOpts), preIntegration);
 
   // Three variant-aware ceilings. One number for all three would stop guarding anything:
   // the upstream-verbatim text is ~2.7x the adapted one and would swallow any regression.
-  const lean = (over) => context.build(Object.assign({}, cfg, over), { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: over.ponytailText || 'adapted', strict: false } });
+  // architect is held disabled here: these ceilings guard the ponytail/lean composition, not
+  // the (separately tested) architect paragraph.
+  const lean = (over) => context.build(Object.assign({}, cfg, { architect: { enabled: false } }, over), { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: over.ponytailText || 'adapted', strict: false } });
   const blockOff = lean({ ponytail: 'off' });
   const blockAdapted = lean({ ponytail: 'full', ponytailText: 'adapted' });
   const blockUpstream = lean({ ponytail: 'full', ponytailText: 'upstream' });

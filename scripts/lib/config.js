@@ -38,6 +38,7 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
+    architect: { enabled: false, minFiles: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
   },
   balanced: {
     profile: 'balanced',
@@ -68,6 +69,7 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
+    architect: { enabled: true, minFiles: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
   },
   aggressive: {
     profile: 'aggressive',
@@ -98,6 +100,7 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
+    architect: { enabled: true, minFiles: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true },
   },
 };
 
@@ -166,6 +169,8 @@ function envOverrides(env) {
   if (env.XEND_UPSTREAM_PONYTAIL && UPSTREAM_MODES.includes(env.XEND_UPSTREAM_PONYTAIL)) o.upstream = { ponytail: env.XEND_UPSTREAM_PONYTAIL };
   if (env.XEND_PONYTAIL_STRICT !== undefined) o.ponytailStrict = !/^(0|false|off)$/i.test(env.XEND_PONYTAIL_STRICT);
   if (env.XEND_CHECKPOINT !== undefined) o.checkpoint = !/^(0|false|off)$/i.test(env.XEND_CHECKPOINT);
+  if (env.XEND_ARCHITECT !== undefined) o.architect = Object.assign({}, o.architect, { enabled: !/^(0|false|off)$/i.test(env.XEND_ARCHITECT) });
+  if (env.XEND_VERIFY !== undefined) o.architect = Object.assign({}, o.architect, { verify: !/^(0|false|off)$/i.test(env.XEND_VERIFY) });
   return o;
 }
 
@@ -194,6 +199,10 @@ function resolve(opts) {
   if (!PONYTAIL_TEXTS.includes(cfg.ponytailText)) cfg.ponytailText = PROFILES[profileName].ponytailText;
   if (!cfg.upstream || !UPSTREAM_MODES.includes(cfg.upstream.ponytail)) cfg.upstream = { ponytail: PROFILES[profileName].upstream.ponytail };
   cfg.ponytailStrict = cfg.ponytailStrict === true;
+  // A non-object architect value (e.g. `false` from a session override or .xend.json) means
+  // "disable it"; normalize back to a full profile-shaped object so every reader can assume
+  // cfg.architect is always an object.
+  if (!isObject(cfg.architect)) cfg.architect = Object.assign({}, PROFILES[profileName].architect, { enabled: false });
   // A dedupe marker must never point at a result that server-side clearing has removed.
   if (cfg.contextEditing && cfg.contextEditing.enabled && cfg.shape) {
     if (cfg.shape.dedupe && cfg.shape.dedupeWindow > cfg.contextEditing.keepToolUses) cfg.shape.dedupeWindow = cfg.contextEditing.keepToolUses;

@@ -8,6 +8,7 @@ const config = require('./lib/config.js');
 const io = require('./lib/io.js');
 const state = require('./lib/state.js');
 const checkpoint = require('./lib/checkpoint.js');
+const plan = require('./lib/plan.js');
 
 async function main() {
   const input = io.readHookInput();
@@ -23,6 +24,8 @@ async function main() {
     const m = prev.match(/\nNotes:\n([\s\S]*)$/);
     if (m) data.notes = m[1];
   } catch (_) {}
+  const activePlan = plan.load(dir);
+  if (activePlan) data.plan = activePlan;
   fs.writeFileSync(path.join(dir, 'checkpoint.md'), checkpoint.render(data, input.cwd));
 }
 

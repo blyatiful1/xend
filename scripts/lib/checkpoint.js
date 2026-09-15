@@ -4,6 +4,7 @@
 const fs = require('fs');
 const readline = require('readline');
 const { execFileSync } = require('child_process');
+const plan = require('./plan.js');
 
 const VERIFY_RE = /\b(pytest|unittest|jest|vitest|mocha|npm (run )?(test|lint|build|typecheck)|pnpm (run )?(test|lint|build)|yarn (run )?(test|lint|build)|go (test|build|vet)|cargo (test|build|check|clippy)|make (test|check|lint)|tsc|eslint|ruff|mypy|flake8|black|prettier|rspec|phpunit|dotnet (test|build)|mvn|gradle)\b/;
 
@@ -72,6 +73,14 @@ function render(data, cwd) {
     lines.push('Verification commands used:');
     for (const c of data.commands) lines.push('- ' + c);
   }
+  // Plan.json survives on disk regardless; this is only so /clear and compaction (which re-inject
+  // the checkpoint, not the plan file) keep the architect plan visible too.
+  if (data.plan) {
+    lines.push('Plan:');
+    for (const l of plan.statusLines(data.plan)) lines.push(l);
+  }
+  // Notes stays last: pre-compact.js re-extracts it from the *previous* checkpoint.md with
+  // /\nNotes:\n([\s\S]*)$/, which greedily captures to end-of-file.
   if (data.notes) lines.push('Notes:\n' + data.notes.trim());
   return lines.join('\n') + '\n';
 }

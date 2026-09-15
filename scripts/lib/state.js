@@ -74,6 +74,51 @@ function pruneOld(env, maxAgeDays) {
   return removed;
 }
 
+// Pointers so the CLI (running outside the hook's stdin, e.g. from a skill or a user shell) can
+// find a session's state dir without a --session argument: the most recent session started, and
+// the most recent one started from a given cwd. Best effort, never throws.
+function writeSessionPointers(env, sessionId, dir, cwd) {
+  try {
+    const root = baseDir(env);
+    const payload = { id: sessionId, dir, cwd: cwd || '' };
+    fs.mkdirSync(root, { recursive: true });
+    writeJson(path.join(root, 'latest-session.json'), payload);
+    if (cwd) {
+      const cwdDir = path.join(root, 'by-cwd');
+      fs.mkdirSync(cwdDir, { recursive: true });
+      const key = crypto.createHash('sha1').update(String(cwd)).digest('hex');
+      writeJson(path.join(cwdDir, key + '.json'), payload);
+    }
+  } catch (_) {}
+}
+
+// Resolve which session's state dir the CLI should use, in order: an explicit --session id;
+// CLAUDE_SESSION_ID / CLAUDE_CODE_SESSION_ID from the environment, when that id's state dir
+// already exists; the by-cwd pointer; the latest-session pointer. Returns { dir, id, source },
+// source one of 'arg' | 'env' | 'cwd' | 'latest' | null.
+function resolveSessionDir(opts) {
+  opts = opts || {};
+  const env = opts.env || process.env;
+  const cwd = opts.cwd || process.cwd();
+  if (opts.session) {
+    return { dir: sessionDir(opts.session, env), id: opts.session, source: 'arg' };
+  }
+  const envId = env.CLAUDE_SESSION_ID || env.CLAUDE_CODE_SESSION_ID;
+  if (envId) {
+    const dir = path.join(baseDir(env), safeId(envId));
+    if (fs.existsSync(dir)) return { dir, id: envId, source: 'env' };
+  }
+  const root = baseDir(env);
+  if (cwd) {
+    const key = crypto.createHash('sha1').update(String(cwd)).digest('hex');
+    const p = readJson(path.join(root, 'by-cwd', key + '.json'), null);
+    if (p && p.dir) return { dir: p.dir, id: p.id, source: 'cwd' };
+  }
+  const latest = readJson(path.join(root, 'latest-session.json'), null);
+  if (latest && latest.dir) return { dir: latest.dir, id: latest.id, source: 'latest' };
+  return { dir: null, id: null, source: null };
+}
+
 // Session-scoped overrides set by skills (e.g. /xend:terse off).
 function sessionOverrides(dir) { return readJson(path.join(dir, 'session.json'), {}); }
 function setSessionOverride(dir, key, value) {
@@ -82,4 +127,4 @@ function setSessionOverride(dir, key, value) {
   return writeJson(path.join(dir, 'session.json'), cur);
 }
 
-module.exports = { baseDir, sessionDir, readJson, writeJson, appendLine, hash, persistOriginal, pruneOld, sessionOverrides, setSessionOverride, safeId };
+module.exports = { baseDir, sessionDir, readJson, writeJson, appendLine, hash, persistOriginal, pruneOld, sessionOverrides, setSessionOverride, safeId, writeSessionPointers, resolveSessionDir };

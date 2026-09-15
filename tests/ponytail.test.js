@@ -166,6 +166,7 @@ function blockFor(o) {
   cfg.ponytailText = o.text;
   cfg.ponytailStrict = o.strict === true;
   cfg.upstream = { ponytail: o.upstream };
+  cfg.architect = { enabled: false }; // this file's assertions are about the lean composition only
   const own = ponytail.owns(o.detected, cfg);
   return context.build(cfg, {
     ponytail: { owns: own.ownsLean, upstreamOwns: own.upstreamOwns, injecting: own.injecting, mode: o.detected.mode, channel: o.detected.channel, text: cfg.ponytailText, strict: cfg.ponytailStrict },

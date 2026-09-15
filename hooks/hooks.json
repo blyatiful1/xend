@@ -29,6 +29,12 @@
         "hooks": [
           { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/record-edit.js\"", "timeout": 5 }
         ]
+      },
+      {
+        "matcher": "^Agent$",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/agent-launch.js\"", "timeout": 5 }
+        ]
       }
     ],
     "PreCompact": [
@@ -36,6 +42,13 @@
         "matcher": "^(manual|auto)$",
         "hooks": [
           { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-compact.js\"", "timeout": 10, "statusMessage": "xend: writing checkpoint" }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/subagent-stop.js\"", "timeout": 180, "statusMessage": "xend: verifying subagent result" }
         ]
       }
     ]
