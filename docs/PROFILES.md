@@ -58,7 +58,7 @@ Per-session files live in the first of: `$XEND_STATE_DIR/<session-id>`, `<scratc
 | `plan.json` | the architect plan: goal, project verify command, tasks with their runtime status, attempts, verified flag, scope warnings (`docs/ARCHITECTURE.md` L7) |
 | `agents.json` | launch registry written by `scripts/agent-launch.js` at `PostToolUse(Agent)`: `agentId -> { taskId, subagentType, prompt, toolUseId }`, capped at 200 entries; lets `SubagentStop` recover a task id even when the subagent's own transcript was never written to disk |
 | `verify.jsonl` | one record per `SubagentStop` verification: agent, kind, task, claimed result, verdict, command, exit code, duration, whether it blocked, citations checked/bad, scope warnings; read by `scripts/stats.js` |
-| `gate.json` | written the one time `scripts/pre-edit-gate.js` fires this session, so it never fires twice |
+| `gate.json` | `{ denials, files }` written by `scripts/pre-edit-gate.js` each time it denies a direct edit, up to `architect.gateMaxDenials` times per session |
 
 Session directories older than 7 days are pruned at session start.
 

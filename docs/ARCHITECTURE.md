@@ -93,10 +93,10 @@ five-turn tasks (~0.8% cost per 100 tokens), which is why the cheap adapted text
 `lite` and `balanced`. Architect mode adds a ninth skill (`/xend:plan`) and a fifth agent
 (`xend-worker-lite`), and (default on in `balanced`/`aggressive`) one more paragraph to the block
 itself: measured with `node scripts/xend-cli.js context | wc -c` *(measured here)*, the block is
-**2,841 B / ~748 tokens** at `balanced` with architect enabled against **1,680 B / ~442 tokens**
-with `XEND_ARCHITECT=0` — the architect paragraph costs about **1,161 B / ~306 tokens** (this
+**2,869 B / ~755 tokens** at `balanced` with architect enabled against **1,680 B / ~442 tokens**
+with `XEND_ARCHITECT=0` — the architect paragraph costs about **1,189 B / ~313 tokens** (this
 command renders the block without the lean-rules detection pass, so its totals are not directly
-comparable to the 2,578 B figure above, which includes the adapted lean text). Whether that ~306
+comparable to the 2,578 B figure above, which includes the adapted lean text). Whether that ~313
 extra tokens per session, plus each builder's own cold prefix, pays for itself is exactly what the
 project bench is for (see "Architect mode (L7)" below); it is not assumed. Contents:
 - terse rules for the active level and their exemptions (security warnings, ordered instructions,

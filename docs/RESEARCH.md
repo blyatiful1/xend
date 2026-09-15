@@ -143,7 +143,7 @@ and CLI (`xend-cli.js plan`), an architect paragraph in the session block, `xend
 `PreToolUse` gate that makes the floor mechanical (H22). → Saving: **qualitative only** — no number
 is claimed here. The mechanism targets the single largest cost driver this document has found
 (section 1: reading is ~76% of context), at the price of a plan write, one cold builder prefix per
-task, and the architect paragraph itself (measured here at ~306 tokens, see `docs/ARCHITECTURE.md`
+task, and the architect paragraph itself (measured here at ~313 tokens, see `docs/ARCHITECTURE.md`
 L7). → Quality risk: a cheap builder can misjudge scope or misreport success; H21 is the mitigation,
 not a guarantee. → **Grade C until the project bench runs.** → Validation: `bench/tasks/project-*`,
 comparing `arch-<model>:xend:<model>:architect` against `solo-<model>:baseline:<model>`
@@ -275,7 +275,7 @@ power per run and are the next step for the suite.
 - Model aliases `haiku`, `sonnet`, `opus`, `fable` all resolve in headless mode.
 - Smoke test 1 (architect paragraph in the session block, no gate; a headless Sonnet session given a three-module package to implement): the model did the task itself — 10 turns, no plan, zero subagents, $0.28. The rule was read and ignored.
 - Smoke test 2 (a first, soft gate that refused the third direct edit once and named `plan off` as the way out): the model ran `plan off` and finished directly — 11 turns, one denial, $0.18. This is why the shipped gate (`docs/SPEC-architect.md` section 13, H22) never advertises an exit.
-- The session block measured with `node scripts/xend-cli.js context | wc -c` at `balanced`: 2,841 B / ~748 tokens with architect mode on (the default), 1,680 B / ~442 tokens with `XEND_ARCHITECT=0` — the architect paragraph costs about 1,161 B / ~306 tokens (see `docs/ARCHITECTURE.md`).
+- The session block measured with `node scripts/xend-cli.js context | wc -c` at `balanced`: 2,869 B / ~755 tokens with architect mode on (the default), 1,680 B / ~442 tokens with `XEND_ARCHITECT=0` — the architect paragraph costs about 1,189 B / ~313 tokens (see `docs/ARCHITECTURE.md`).
 
 ## 8. Sources
 
