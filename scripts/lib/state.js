@@ -129,7 +129,7 @@ function pruneOld(env, maxAgeDays) {
     }
   }
   let entries = [];
-  try { entries = fs.readdirSync(root); } catch (_) { return 0; }
+  try { entries = fs.readdirSync(root); } catch (_) { return pruned; }
   let removed = 0;
   for (const e of entries.slice(0, 500)) {
     const p = path.join(root, e);

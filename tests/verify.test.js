@@ -435,6 +435,14 @@ test('runVerify: notRunnable only when xend could not start the command, not whe
   assert.equal(ran.exit, 127);
   assert.equal(ran.notRunnable, undefined);
   assert.doesNotThrow(() => verify.runVerify("node -e '1' []] [a", d, 5000));
+  // a runner that exists but cannot be executed is "could not start", not a failed check
+  fs.writeFileSync(path.join(d, 'notexec'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+  const nx = verify.runVerify('./notexec', d, 5000);
+  if (process.platform !== 'win32') { assert.equal(nx.notRunnable, true); assert.match(nx.stderr, /cannot execute/); }
+  // "[!]" is not a bracket expression in bash: it stays literal text
+  fs.writeFileSync(path.join(d, 'a'), '');
+  const lit = verify.runVerify("node -e 'console.log(process.argv[1])' [!]", d, 5000);
+  assert.equal(lit.stdout.trim(), '[!]');
 });
 
 test('runVerify: runs without a shell; a missing program is exit 127, a shell-looking command is never run', () => {

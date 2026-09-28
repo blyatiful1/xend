@@ -122,6 +122,6 @@ test('pruneOld also prunes old pointers under the per-user temp base', () => {
   fs.writeFileSync(f, '{}');
   const old = (Date.now() - 30 * 86400000) / 1000;
   fs.utimesSync(f, old, old);
-  state.pruneOld(env, 7);
+  assert.ok(state.pruneOld(env, 7) >= 1, 'the count includes pointers pruned under the temp base');
   assert.equal(fs.existsSync(f), false);
 });

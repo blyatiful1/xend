@@ -36,7 +36,8 @@ changes `scripts/`, `hooks/`, `agents/` or `skills/` bumps it.
   `npm test\ntouch x` is refused, `ruff` may only check, `tsc` needs `--noEmit`, npm/pnpm/yarn may
   run only the `test` script (so `npm run test:unit` is recorded as unverifiable, not re-run), and
   make only its `test` or `check` target. A command that
-  cannot run on the machine (exit 126 or 127) is recorded as unverifiable, not as a failure.
+  xend cannot start on the machine (missing or not executable) is recorded as unverifiable, not
+  as a failure; a check that ran and exited 126 or 127 is an ordinary failure.
 - A repository's `.xend.json` can no longer turn the auto-test on (by any value, or by choosing
   a profile), choose its command, trust it, or stretch its timeouts. Timeouts are capped below the
   hook timeouts.

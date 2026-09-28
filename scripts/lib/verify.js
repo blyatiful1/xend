@@ -263,6 +263,7 @@ function segmentRe(seg) {
     else if (c === '[' && seg.indexOf(']', i + 2) !== -1) {
       const j = seg.indexOf(']', i + 2);
       let cls = seg.slice(i + 1, j).replace(/\\/g, '\\\\');
+      if (cls === '!') { re += '\\['; continue; } // bash leaves "[!]" as literal text
       if (cls[0] === '!') cls = '^' + cls.slice(1);
       re += '[' + cls + ']';
       i = j;
@@ -398,8 +399,10 @@ function runVerify(cmd, cwd, timeoutMs) {
     res = { status: 1, stdout: Buffer.from(''), stderr: Buffer.from(String((e && e.message) || e)), error: e };
   }
   const ms = Date.now() - start;
-  if (res.error && res.error.code === 'ENOENT') {
-    return { exit: 127, notRunnable: true, stdout: '', stderr: argv[0] + ': command not found', ms, timedOut: false };
+  // the program could not be started at all: missing, not executable, busy, or not a valid binary
+  if (res.error && ['ENOENT', 'EACCES', 'ETXTBSY', 'ENOEXEC'].includes(res.error.code)) {
+    const why = res.error.code === 'ENOENT' ? 'command not found' : 'cannot execute (' + res.error.code + ')';
+    return { exit: res.error.code === 'ENOENT' ? 127 : 126, notRunnable: true, stdout: '', stderr: argv[0] + ': ' + why, ms, timedOut: false };
   }
   const timedOut = !!(res.error && (res.error.code === 'ETIMEDOUT' || res.signal === 'SIGTERM'));
   let exit = res.status;
