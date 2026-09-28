@@ -17,6 +17,10 @@ claude plugin validate . --strict # plugin and marketplace manifests
 
 ## What a change needs
 
+- **A version bump** in `.claude-plugin/plugin.json` and `package.json`, plus a `CHANGELOG.md`
+  entry, for any change to `scripts/`, `hooks/`, `agents/` or `skills/`: Claude Code updates an
+  installed plugin only when the version changes.
+
 - **Shaping transforms** (`scripts/lib/shape.js`) must stay deterministic string work and
   recoverable. Errors, failures, diffs, stack traces and summary lines are never dropped;
   anything condensed carries a `[xend]` line saying what was removed. Add a unit test in
@@ -43,8 +47,10 @@ claude plugin validate . --strict # plugin and marketplace manifests
   `verify.js` and in `tests/verify.test.js`, or `scripts/subagent-stop.js` silently stops
   verifying what the agent claims. New hooks must never call a model and must never run a
   command that is not checked against an explicit allowlist first (see
-  `scripts/lib/verify.js`'s `commandAllowed`); this holds for every hook, not only
-  `SubagentStop` (the auto-test in `scripts/lib/autotest.js` goes through the same check).
+  `scripts/lib/verify.js`'s `commandAllowed`), must run it without a shell (`runVerify`), and
+  must run it only when `scripts/lib/permissions.js`'s `check` says Claude Code would run it
+  without asking; this holds for every hook, not only `SubagentStop` (the auto-test in
+  `scripts/lib/autotest.js` goes through the same checks).
 
 ## Reporting bugs
 

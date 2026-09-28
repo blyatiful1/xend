@@ -52,7 +52,7 @@ if [ "$WITH_PONYTAIL" = "1" ]; then
   claude plugin install "ponytail@ponytail" -s "$SCOPE" -y || say "  could not install ponytail; run: claude plugin install ponytail@ponytail -s $SCOPE -y"
   say "  ponytail owns the lean ruleset; xend will defer to it and add only a short reconciliation note."
 else
-  say "Lean ruleset: xend's own adapted rules (untested condensation of ponytail's; /xend:ponytail to change)."
+  say "Lean ruleset: off by default (/xend:ponytail full turns on xend's adapted rules for a session)."
 fi
 
 CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/xend"
@@ -67,6 +67,8 @@ fi
 say ""
 say "Done. Start a new Claude Code session, then:"
 say "  /xend:doctor                 audit this environment for token waste"
-say "  /xend:setup $PROFILE --with-recommended   apply recommended native settings (dry-run first without the flag)"
+say "  /xend:setup $PROFILE --dry-run --with-recommended   preview the recommended native settings"
+say "  /xend:setup $PROFILE --with-recommended   apply them (backup + diff; /xend:setup --undo restores)"
+say "  Auto-test after edits runs once your test command is allowed (approve it once with \"don't ask again\")"
 say "  /xend:stats                  see what a session spent and what shaping saved"
 say "  /xend:ponytail [lite|full|ultra|off|rules]   set the lean build rules for a session"

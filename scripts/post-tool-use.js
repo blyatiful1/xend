@@ -17,9 +17,12 @@ function main() {
   const resp = input.tool_response;
   if (resp == null) return;
   // Never shape inside subagents: a scout or reader must see exact evidence, and its context is
-  // discarded anyway; the parent only receives its summary.
-  if (input.agent_id || input.agent_type || /\/subagents\//.test(input.transcript_path || '')) return;
+  // discarded anyway; the parent only receives its summary. agent_id marks a subagent; agent_type
+  // alone is also set on the main thread of a `claude --agent` session, which is shaped as usual.
+  if (input.agent_id || /\/subagents\//.test(input.transcript_path || '')) return;
   const dir = state.sessionDir(input.session_id, process.env, input.scratchpad_dir);
+  // pre-read.js already cut this read: its note is owed whatever the shaping settings say now
+  if (tool === 'Read') limitedReadContext(input, resp, dir, input.tool_use_id || '');
   const cfg = state.readJson(path.join(dir, 'config.json'), null) || config.resolve({ cwd: input.cwd });
   const overrides = state.sessionOverrides(dir);
   if (overrides.shape === false || !cfg.shape || !cfg.shape.enabled) return;
@@ -29,7 +32,7 @@ function main() {
 
   let result = null;
   if (tool === 'Bash') result = handleBash(input, resp, sc, dir, id);
-  else if (tool === 'Read') { limitedReadContext(input, resp, dir, id); result = handleRead(input, resp, sc, dir, id); }
+  else if (tool === 'Read') result = handleRead(input, resp, sc, dir, id);
   else if (tool === 'Grep') result = handleGrep(input, resp, sc, dir, id);
   else if (tool === 'Glob') result = handleGlob(input, resp, sc, dir, id);
   else if (tool.startsWith('mcp__') && sc.mcp) result = handleMcp(input, resp, sc, dir, id);
@@ -147,10 +150,10 @@ function handleRead() { return null; }
 // result): the rendered result does not make totalLines obvious, and a model that believes the
 // file ends at line 250 would be a silent error.
 function limitedReadContext(input, resp, dir, id) {
-  const regFile = path.join(dir, 'limited-reads.json');
-  const reg = state.readJson(regFile, null);
-  if (!reg || !reg[id]) return;
-  const info = reg[id]; delete reg[id]; state.writeJson(regFile, reg);
+  const regFile = path.join(dir, 'limited-read-' + state.safeId(id) + '.json');
+  const info = state.readJson(regFile, null);
+  if (!info) return;
+  try { fs.unlinkSync(regFile); } catch (_) {}
   const file = (resp && resp.file) || {};
   const total = file.totalLines || info.total;
   const shown = file.numLines || info.limit;

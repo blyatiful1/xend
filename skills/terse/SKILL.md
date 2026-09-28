@@ -3,14 +3,14 @@ name: terse
 description: Set the xend terse output level for this session: lite, full, ultra, or off.
 argument-hint: "[lite|full|ultra|off]"
 disable-model-invocation: true
-allowed-tools: Bash(node *)
+allowed-tools: Bash(node *scripts/xend-cli.js*)
 ---
 
 Level requested: `$ARGUMENTS` (empty means show the current level).
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" set "${CLAUDE_SESSION_ID}" terse "${ARGUMENTS:-full}" 2>&1 || true`
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" set "${CLAUDE_SESSION_ID}" terse "$ARGUMENTS" --data "${CLAUDE_PLUGIN_DATA}" 2>&1 || true`
 
-Apply this output style for the rest of the session, starting with your next reply:
+If a level was set, apply that output style for the rest of the session, starting with your next reply; if the output only shows the current level, change nothing:
 
 - **off**: normal style.
 - **lite**: concise. No filler, pleasantries, or hedging. Keep full sentences and articles. No narration of tool calls; do not restate diffs or file contents; at most one summary line.

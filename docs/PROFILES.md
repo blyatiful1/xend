@@ -33,20 +33,30 @@ Any layer may set `"profile"` and override individual keys. Example `.xend.json`
 | `shape.readLimitMinLines` (PreToolUse: unranged Read of a file with at least N lines becomes a ranged read of `readLimit` lines) | off | off | 800 lines, limit 250 |
 | `shape.mcp` (shape MCP tool text results) | off | off | on |
 | `delegation` (kept for configs that set it; the session block no longer advertises subagents) | on | on | on |
-| `autoTest.enabled` (after an Edit/MultiEdit in the main session, run the project's quick tests and attach the result so the model skips its own test turn; allowlisted commands only, never one your `permissions.deny`/`ask` rules cover, switched off for the session when a run exceeds `autoTest.maxMs`) | off | on | on |
-| `autoTest.command` (empty = detect: pytest when Python tests exist, else `npm test` with a real test script, else `node --test` with `*.test.js` files) / `maxMs` / `timeoutMs` / `maxChars` | `''` / 8000 / 20000 / 1200 | same | same |
+| `autoTest.enabled` (after an Edit/MultiEdit in the main session, run the project's quick tests and attach the result so the model skips its own test turn; allowlisted commands only, and only one Claude Code would run without asking: an allow rule matches it, the session is in `bypassPermissions` mode, or `trustTestCommands` is on; a deny or ask rule always wins; switched off for the session when a run exceeds `autoTest.maxMs`) | off | on | on |
+| `autoTest.command` (empty = detect: pytest when Python tests exist, else `npm test` with a real test script, else `node --test` with `*.test.js` files) / `maxMs` / `timeoutMs` (capped at 25 s, under the hook's 30 s) / `maxChars` | `''` / 8000 / 20000 / 1200 | same | same |
+| `trustTestCommands` (let hooks run the detected test command, and SubagentStop's re-runs, without an allow rule; `XEND_TRUST_TESTS=1`) | false | false | false |
 | `checkpoint` (PreCompact checkpoint, re-injected on compact/clear) | on | on | on |
 | `contextEditing` (server-side clearing of old tool results via `CLAUDE_CODE_EXTRA_BODY`) | off | off | on: trigger 110k input tokens, keep 12 tool uses, clear at least 40k |
 | `architect.enabled` (plan-then-build: the main model plans, cheap subagents build in disposable contexts) (opt-in: XEND_ARCHITECT=1, .xend.json, or /xend:plan on; docs/ARCHITECTURE.md L7) | false | false | false |
 | `architect.minFiles` / `architect.minToolCalls` (guidance floor named in the session block; `minFiles` also sets the gate's file threshold) | 4 / 8 | 4 / 8 | 4 / 8 |
 | `architect.verify` (`SubagentStop` re-runs each builder's own verify command instead of trusting its claim) | true | true | true |
-| `architect.verifyTimeoutMs` | 120000 | 120000 | 120000 |
+| `architect.verifyTimeoutMs` (capped at 170 s, under the hook's 180 s) | 120000 | 120000 | 120000 |
 | `architect.blockOnMismatch` (a mismatched or malformed reply is blocked once so the builder restates truthfully) | true | true | true |
 | `architect.gate` / `architect.gateMaxDenials` (`PreToolUse` denies a direct edit once a plan is above the file floor and no plan exists yet; bounded to this many denials per session) | true / 3 | true / 3 | true / 3 |
 
+### What a repository's `.xend.json` may set
+
+A `.xend.json` (or `.xend/config.json`) found walking up from the working directory is part of the
+repository, so it cannot decide which command a hook runs without a prompt, or for how long:
+`autoTest.enabled: true`, `autoTest.command`, `autoTest.timeoutMs`, `autoTest.maxMs`,
+`trustTestCommands` and `architect.verifyTimeoutMs` are ignored there (and listed as
+`ignoredProjectKeys` in `node scripts/xend-cli.js config`). It can still turn the auto-test off.
+Set those keys in `~/.config/xend/config.json` or through `XEND_*` variables instead.
+
 ## Session state
 
-Per-session files live in the first of: `$XEND_STATE_DIR/<session-id>`, `<scratchpad_dir>/xend` (Claude Code's per-session scratch directory, when the hook input provides it), `$CLAUDE_PLUGIN_DATA/sessions/<session-id>`, `<tmpdir>/xend/<session-id>`.
+Per-session files live in the first of: `$XEND_STATE_DIR/<session-id>`, `<scratchpad_dir>/xend` (Claude Code's per-session scratch directory, when the hook input provides it), `$CLAUDE_PLUGIN_DATA/sessions/<session-id>`, `<tmpdir>/xend-<uid>/<session-id>`. Directories are created `0700` and files `0600`, since saved tool output can hold secrets.
 
 | File | Purpose |
 |---|---|
@@ -63,16 +73,24 @@ Per-session files live in the first of: `$XEND_STATE_DIR/<session-id>`, `<scratc
 | `agents.json` | launch registry written by `scripts/agent-launch.js` at `PostToolUse(Agent)`: `agentId -> { taskId, subagentType, prompt, toolUseId }`, capped at 200 entries; lets `SubagentStop` recover a task id even when the subagent's own transcript was never written to disk |
 | `verify.jsonl` | one record per `SubagentStop` verification: agent, kind, task, claimed result, verdict, command, exit code, duration, whether it blocked, citations checked/bad, scope warnings; read by `scripts/stats.js` |
 | `gate.json` | `{ denials, files }` written by `scripts/pre-edit-gate.js` each time it denies a direct edit, up to `architect.gateMaxDenials` times per session |
+| `permission-hints.json` | which "add this allow rule" notes the user has already been shown this session |
+| `limited-read-<id>.json` | one per Read that `pre-read.js` limited, consumed by the PostToolUse hook for its "file has N lines" note |
 
 Session directories older than 7 days are pruned at session start.
 
-Two pointer files live at the *state base directory* (`$XEND_STATE_DIR`, `<scratchpad_dir>/xend`, `$CLAUDE_PLUGIN_DATA/sessions`, or `<tmpdir>/xend`, whichever resolves — one level up from the per-session directories above), written by `session-start.js` on every start so the CLI can find a session's state without a `--session` argument: `latest-session.json` (`{ id, dir, cwd }` for the most recent start) and `by-cwd/<sha1 of cwd>.json` (the same shape, keyed by working directory, so `plan next` run from a shell in the project's directory finds the right session).
+Pointer files live at the *state base directory* (`$XEND_STATE_DIR`, `$CLAUDE_PLUGIN_DATA/sessions`, or `<tmpdir>/xend-<uid>`), written by `session-start.js` on every start so the CLI finds the directory the hooks use: `by-session/<session-id>.json` (`{ id, dir, cwd }`), `latest-session.json` (the most recent start) and `by-cwd/<sha1 of cwd>.json` (keyed by working directory, so `plan next` run from a shell in the project's directory finds the right session). Hooks get `CLAUDE_PLUGIN_DATA` (and sometimes `scratchpad_dir`); the Bash tool that runs a skill's command gets neither, so skills pass the substituted `${CLAUDE_PLUGIN_DATA}` to the CLI as `--data` and the CLI follows the `by-session` pointer.
 
 ## Native settings written by `/xend:setup <profile> --with-recommended`
 
+`/xend:setup` with no arguments is a dry run of `balanced`. A settings file that does not parse (a
+comment, a trailing comma) is never overwritten: setup stops and names it. Every file it changes is
+backed up first, and `/xend:setup --undo` restores the latest backup. It installs the upstream
+ponytail plugin only with `--install-ponytail`, never as part of `--with-recommended`, and it does
+not set `promptCacheTtl`: the 1-hour cache costs 2x input per cache write against 1.25x for 5
+minutes, which pays off only when you pause more than 5 minutes between turns.
+
 | Setting | Value | Why |
 |---|---|---|
-| `promptCacheTtl` | `1h` | pauses longer than 5 minutes would otherwise miss the cache and re-write the whole prefix (write cost 2x instead of 1.25x; already the default on subscriptions within included usage; skip on an API key with continuous traffic) |
 | `bashOutputMaxChars` | 20000 | native head-only cap (default 30,000); the full output is still persisted to a file by Claude Code |
 | `env.MAX_MCP_OUTPUT_TOKENS` | `10000` | MCP results default to a 25,000-token cap |
 | `env.CLAUDE_CODE_EXTRA_BODY` | context editing body | only on `aggressive`; removed when switching back; each clearing pass re-caches the remaining context, so it pays off on sessions that continue about 20 or more turns after a pass |

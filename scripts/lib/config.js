@@ -38,8 +38,13 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
-    // run the project's quick tests after an Edit and attach the result (saves the test turn); off in lite
+    // run the project's quick tests after an Edit and attach the result (saves the test turn); off in lite.
+    // Runs only a command Claude Code would run without asking (an allow rule, bypass mode, or
+    // trustTestCommands below): scripts/lib/permissions.js
     autoTest: { enabled: false, command: '', maxMs: 8000, timeoutMs: 20000, maxChars: 1200 },
+    // let hooks run the detected test command without an allow rule; honoured from the user config
+    // and XEND_TRUST_TESTS only, never from a repository's .xend.json
+    trustTestCommands: false,
     // plan-then-build: opt-in (XEND_ARCHITECT=1, .xend.json {"architect":{"enabled":true}}, or /xend:plan on); bench r6/r7 measured +125% to +250% cost on greenfield project tasks
     architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
@@ -73,6 +78,7 @@ const PROFILES = {
     checkpoint: true,
     readingDiscipline: true,
     autoTest: { enabled: true, command: '', maxMs: 8000, timeoutMs: 20000, maxChars: 1200 },
+    trustTestCommands: false,
     // plan-then-build: opt-in (XEND_ARCHITECT=1, .xend.json {"architect":{"enabled":true}}, or /xend:plan on); bench r6/r7 measured +125% to +250% cost on greenfield project tasks
     architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
@@ -106,6 +112,7 @@ const PROFILES = {
     checkpoint: true,
     readingDiscipline: true,
     autoTest: { enabled: true, command: '', maxMs: 8000, timeoutMs: 20000, maxChars: 1200 },
+    trustTestCommands: false,
     // plan-then-build: opt-in (XEND_ARCHITECT=1, .xend.json {"architect":{"enabled":true}}, or /xend:plan on); bench r6/r7 measured +125% to +250% cost on greenfield project tasks
     architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
@@ -177,6 +184,7 @@ function envOverrides(env) {
   if (env.XEND_PONYTAIL_STRICT !== undefined) o.ponytailStrict = !/^(0|false|off)$/i.test(env.XEND_PONYTAIL_STRICT);
   if (env.XEND_AUTOTEST !== undefined) o.autoTest = Object.assign({}, o.autoTest, { enabled: !/^(0|false|off)$/i.test(env.XEND_AUTOTEST) });
   if (env.XEND_AUTOTEST_CMD) o.autoTest = Object.assign({}, o.autoTest, { command: env.XEND_AUTOTEST_CMD });
+  if (env.XEND_TRUST_TESTS !== undefined) o.trustTestCommands = !/^(0|false|off)$/i.test(env.XEND_TRUST_TESTS);
   if (env.XEND_CHECKPOINT !== undefined) o.checkpoint = !/^(0|false|off)$/i.test(env.XEND_CHECKPOINT);
   if (env.XEND_ARCHITECT !== undefined) o.architect = Object.assign({}, o.architect, { enabled: !/^(0|false|off)$/i.test(env.XEND_ARCHITECT) });
   if (env.XEND_ARCHITECT_GATE !== undefined) o.architect = Object.assign({}, o.architect, { gate: !/^(0|false|off)$/i.test(env.XEND_ARCHITECT_GATE) });
@@ -191,6 +199,36 @@ function envOverrides(env) {
   return o;
 }
 
+// Settings a repository's own .xend.json may not make: anything that decides which command a hook
+// runs without a prompt, or for how long. A repository can still turn auto-test off. Returns the
+// cleaned layer and the dotted names of what was dropped (cfg.ignoredProjectKeys).
+function projectLayer(json) {
+  const out = deepMerge({}, json);
+  const ignored = [];
+  if (Object.prototype.hasOwnProperty.call(out, 'trustTestCommands')) { delete out.trustTestCommands; ignored.push('trustTestCommands'); }
+  if (isObject(out.autoTest)) {
+    const at = out.autoTest = Object.assign({}, out.autoTest);
+    if ('enabled' in at && at.enabled !== false) { delete at.enabled; ignored.push('autoTest.enabled'); }
+    for (const k of ['command', 'timeoutMs', 'maxMs']) if (k in at) { delete at[k]; ignored.push('autoTest.' + k); }
+  }
+  if (isObject(out.architect) && 'verifyTimeoutMs' in out.architect) {
+    out.architect = Object.assign({}, out.architect);
+    delete out.architect.verifyTimeoutMs; ignored.push('architect.verifyTimeoutMs');
+  }
+  return { json: out, ignored };
+}
+
+// Hook timeouts in hooks/hooks.json: record-edit.js 30 s, subagent-stop.js 180 s. A run must end
+// before its hook is killed, or its result (and the "too slow" switch-off) is lost.
+const AUTOTEST_TIMEOUT_CAP_MS = 25000;
+const VERIFY_TIMEOUT_CAP_MS = 170000;
+
+// Only the three profiles themselves: a name such as "toString" or "__proto__" from a config file is
+// not a profile.
+function isProfile(name) {
+  return typeof name === 'string' && Object.prototype.hasOwnProperty.call(PROFILES, name);
+}
+
 // Layered config. Each layer may set "profile" (switches the base defaults) and any override keys.
 function resolve(opts) {
   opts = opts || {};
@@ -201,14 +239,20 @@ function resolve(opts) {
   const user = readJson(userConfigPath());
   if (user) { layers.push(user); sources.push(userConfigPath()); }
   const proj = findProjectConfig(cwd);
-  if (proj) { layers.push(proj.json); sources.push(proj.file); }
+  let ignored = [];
+  if (proj) {
+    const safe = projectLayer(proj.json);
+    layers.push(safe.json); sources.push(proj.file); ignored = safe.ignored;
+  }
   const envLayer = envOverrides(env);
-  if (env.XEND_PROFILE && PROFILES[env.XEND_PROFILE]) envLayer.profile = env.XEND_PROFILE;
+  if (env.XEND_PROFILE && isProfile(env.XEND_PROFILE)) envLayer.profile = env.XEND_PROFILE;
   if (Object.keys(envLayer).length) { layers.push(envLayer); sources.push('env'); }
 
   let profileName = 'balanced';
-  for (const l of layers) if (l && PROFILES[l.profile]) profileName = l.profile;
-  let cfg = deepMerge({}, PROFILES[profileName]);
+  for (const l of layers) if (l && isProfile(l.profile)) profileName = l.profile;
+  // a deep copy: deepMerge shares nested objects no layer overrides, and the lines below assign
+  // into cfg.autoTest and cfg.architect, which must never write through to PROFILES
+  let cfg = JSON.parse(JSON.stringify(PROFILES[profileName]));
   for (const l of layers) cfg = deepMerge(cfg, l);
   cfg.profile = profileName;
   if (!TERSE_LEVELS.includes(cfg.terse)) cfg.terse = PROFILES[profileName].terse;
@@ -224,8 +268,21 @@ function resolve(opts) {
   if (cfg.contextEditing && cfg.contextEditing.enabled && cfg.shape) {
     if (cfg.shape.dedupe && cfg.shape.dedupeWindow > cfg.contextEditing.keepToolUses) cfg.shape.dedupeWindow = cfg.contextEditing.keepToolUses;
   }
+  cfg.trustTestCommands = cfg.trustTestCommands === true;
+  // The auto-test is on only if the user's own choice (profile and autoTest.enabled from the user
+  // config and the environment) turns it on: a repository picking a profile cannot, and it can
+  // only turn it off. Only a literal true counts.
+  if (isObject(cfg.autoTest)) {
+    let own = PROFILES.balanced.autoTest.enabled;
+    for (const l of [user, envLayer]) if (l && isProfile(l.profile)) own = PROFILES[l.profile].autoTest.enabled;
+    for (const l of [user, envLayer]) if (l && isObject(l.autoTest) && 'enabled' in l.autoTest) own = l.autoTest.enabled === true;
+    cfg.autoTest.enabled = own === true && cfg.autoTest.enabled === true;
+  }
+  if (isObject(cfg.autoTest)) cfg.autoTest.timeoutMs = Math.min(Number(cfg.autoTest.timeoutMs) || 20000, AUTOTEST_TIMEOUT_CAP_MS);
+  cfg.architect.verifyTimeoutMs = Math.min(Number(cfg.architect.verifyTimeoutMs) || 120000, VERIFY_TIMEOUT_CAP_MS);
   cfg.sources = sources;
+  if (ignored.length) cfg.ignoredProjectKeys = ignored;
   return cfg;
 }
 
-module.exports = { PROFILES, TERSE_LEVELS, PONYTAIL_LEVELS, PONYTAIL_TEXTS, UPSTREAM_MODES, resolve, deepMerge, userConfigPath, findProjectConfig, readJson };
+module.exports = { PROFILES, TERSE_LEVELS, projectLayer, AUTOTEST_TIMEOUT_CAP_MS, VERIFY_TIMEOUT_CAP_MS, PONYTAIL_LEVELS, PONYTAIL_TEXTS, UPSTREAM_MODES, resolve, deepMerge, userConfigPath, findProjectConfig, readJson };

@@ -175,18 +175,186 @@ function parseWorkerReply(text) {
 
 const ALLOWLIST_RE = /^(python3?\s+-m\s+(pytest|unittest)|pytest|npm\s+(run\s+)?test|pnpm\s+(run\s+)?test|yarn\s+(run\s+)?test|node\s+--test|go\s+test|cargo\s+(test|check)|make\s+(test|check)|bash\s+[\w./-]*test[\w./-]*\.sh|\.\/[\w./-]*test[\w./-]*\.sh|ruff|eslint|tsc|mypy|node\s+[\w./-]+\.test\.js)\b/;
 // An import smoke check: `python3 -c "import a.b"` or `python -c 'import a.b, c.d'`, one or more
-// dotted module names, one quote style used consistently, nothing else in the string.
-const IMPORT_SMOKE_RE = /^python3?\s+-c\s+(["'])import\s+[\w.]+(?:\s*,\s*[\w.]+)*\1$/;
-// The allowlist's own "|" characters above are regex alternation, not shell pipes; a command
-// still needs no shell metacharacters at all to run.
-const FORBIDDEN_RE = /[;&|<>`]|\$\(/;
+// dotted module names, nothing else.
+const IMPORT_SMOKE_RE = /^import\s+[\w.]+(?:\s*,\s*[\w.]+)*$/;
+// Commands run without a shell (see runVerify), so shell syntax would reach a runner as literal
+// text and mean something else than it does in bash; a command using any is refused instead. Inside
+// '...' everything is literal in bash too; inside "..." bash still expands $, ` and \.
+const UNQUOTED_FORBIDDEN_RE = /[;&|<>`$\\%^(){}]/;
+const DQUOTED_FORBIDDEN_RE = /[`$\\]/;
+
+// Flags a verify or test command may carry. Anything else makes the command unverifiable rather
+// than run: --basetemp, --rootdir, -c, -o, --junitxml, -exec, --script-shell, -r/--require, --fix,
+// --outDir can delete, write or load files outside the test run, and --collect-only, --test-only,
+// --passWithNoTests, --if-present or make's -i would let a check "pass" without running tests.
+const SAFE_FLAGS = new Set([
+  // pytest / unittest
+  '-q', '-qq', '-v', '-vv', '-vvv', '-x', '-s', '-l', '-k', '-m', '-p', '-W', '-n', '-t', '-b',
+  '--tb', '--maxfail', '--lf', '--last-failed', '--ff', '--failed-first', '--nf', '--new-first', '--sw',
+  '--stepwise', '--no-header', '--no-summary', '--disable-warnings', '--durations',
+  '--durations-min', '--strict-markers', '--strict-config', '--runxfail', '--color', '--capture', '--showlocals',
+  '--exitfirst', '--quiet', '--verbose', '--import-mode', '--timeout', '--locals', '--failfast', '--buffer',
+  '--no-cov', '--cov',
+  // node --test
+  '--test', '--test-reporter', '--test-name-pattern', '--test-concurrency', '--test-timeout', '--test-force-exit',
+  // npm / pnpm / yarn, and common runner flags passed after `--`
+  '--', '--silent', '--runInBand', '--ci', '--bail', '--testNamePattern', '--grep', '-g', '--reporter',
+  '--watch', '--watchAll', '--run', // --watch and --watchAll only as =false (see argsSafe)
+  // go test
+  '-run', '-count', '-race', '-short', '-timeout', '-cover', '-failfast', '-bench', '-tags', '-vet', '-json',
+  // cargo
+  '--lib', '--bins', '--bin', '--tests', '--examples', '--all', '--workspace', '--package', '--no-fail-fast',
+  '--release', '--features', '-F', '--all-features', '--no-default-features', '--all-targets', '--locked',
+  '--offline', '--frozen', '--nocapture', '--test-threads', '--exact', '--ignored', '--include-ignored',
+  '--show-output', '-j', '--jobs',
+  // make
+  '-k', '--keep-going',
+  // linters and type checkers (never --fix / --write / --outDir)
+  '--check', '--diff', '--select', '--ignore', '--extend-select', '--no-cache', '--output-format', '--statistics',
+  '--max-warnings', '--ext', '--no-warn-ignored', '--noEmit', '--project', '--pretty', '--skipLibCheck', '--strict',
+  '--ignore-missing-imports', '--no-error-summary', '--check-untyped-defs', '--python-version', '--no-incremental',
+  '--show-error-codes', '--follow-imports',
+]);
+
+// Splits a command into argv the way bash would for the simple commands allowed here: words split
+// on whitespace, '...' and "..." quoting, an unquoted # starting a comment. null when it is empty,
+// unbalanced, spans lines, or uses shell syntax (UNQUOTED_FORBIDDEN_RE / DQUOTED_FORBIDDEN_RE).
+// argv.globs[i] is true when word i holds an unquoted * ? or [ that bash would expand (runVerify
+// expands it the same way).
+function parseCommand(cmd) {
+  if (typeof cmd !== 'string') return null;
+  const s = cmd.trim();
+  if (!s || /[\n\r\0]/.test(s)) return null;
+  const argv = [];
+  const globs = [];
+  let cur = null, quote = null, glob = false;
+  const flush = () => { if (cur !== null) { argv.push(cur); globs.push(glob); } cur = null; glob = false; };
+  for (const ch of s) {
+    if (quote) {
+      if (ch === quote) { quote = null; continue; }
+      if (quote === '"' && DQUOTED_FORBIDDEN_RE.test(ch)) return null;
+      cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch; if (cur === null) cur = '';
+    } else if (/\s/.test(ch)) {
+      flush();
+    } else if (ch === '#' && cur === null) {
+      break;
+    } else {
+      if (UNQUOTED_FORBIDDEN_RE.test(ch)) return null;
+      if (ch === '*' || ch === '?' || ch === '[') glob = true;
+      cur = (cur === null ? '' : cur) + ch;
+    }
+  }
+  if (quote) return null;
+  flush();
+  if (!argv.length) return null;
+  argv.globs = globs;
+  return argv;
+}
+
+// One glob path segment as a regex: * and ? within a name, [...] and [!...] classes.
+function segmentRe(seg) {
+  let re = '';
+  for (let i = 0; i < seg.length; i++) {
+    const c = seg[i];
+    if (c === '*') re += '[^/]*';
+    else if (c === '?') re += '[^/]';
+    else if (c === '[' && seg.indexOf(']', i + 2) !== -1) {
+      const j = seg.indexOf(']', i + 2);
+      let cls = seg.slice(i + 1, j).replace(/\\/g, '\\\\');
+      if (cls === '!') { re += '\\['; continue; } // bash leaves "[!]" as literal text
+      if (cls[0] === '!') cls = '^' + cls.slice(1);
+      re += '[' + cls + ']';
+      i = j;
+    } else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp('^' + re + '$');
+}
+
+const MAX_GLOB_WORDS = 5000;
+
+// Pathname expansion as bash does it by default: the sorted matching paths under cwd, or the word
+// itself when nothing matches. Names starting with "." match only a pattern that does too.
+function expandGlob(word, cwd) {
+  const parts = word.split('/');
+  let bases = [''];
+  for (let k = 0; k < parts.length && bases.length; k++) {
+    const seg = parts[k];
+    const next = [];
+    for (const b of bases) {
+      if (!/[*?[]/.test(seg)) { next.push(b ? b + '/' + seg : seg); continue; }
+      let names = [];
+      try { names = fs.readdirSync(path.join(cwd, b || '.')); } catch (_) {}
+      const re = segmentRe(seg);
+      for (const n of names) if (re.test(n) && (!n.startsWith('.') || seg.startsWith('.'))) next.push(b ? b + '/' + n : n);
+    }
+    bases = next;
+  }
+  const hits = bases.filter((p) => { try { fs.statSync(path.join(cwd, p)); return true; } catch (_) { return false; } }).sort();
+  return hits.length ? hits : [word];
+}
+
+// A value that names a file must stay inside the project: relative, no "..", no "~".
+function pathSafe(v) {
+  const s = String(v);
+  if (/^[\\/~]/.test(s) || /^[A-Za-z]:/.test(s)) return false;
+  return !/(^|[\\/])\.\.([\\/]|$)/.test(s);
+}
+
+// Every word after the runner must be a SAFE_FLAGS flag (value after "=" path-checked), pytest's
+// -r<chars> report switch, or a path-safe positional; a positional holding "=" is only accepted as
+// a flag's value. Under Python, `-p` loads a plugin module, so there it only takes "no:<plugin>"
+// or a glob pattern (unittest's -p); tsc and cargo use -p for a project path or package name.
+function argsSafe(argv, runner) {
+  const python = /^(pytest|python3?)$/.test(runner || '');
+  let prevFlag = null;
+  for (const a of argv) {
+    if (a.startsWith('-') && a.length > 1 && !/^-\d/.test(a)) {
+      const eq = a.indexOf('=');
+      const name = eq === -1 ? a : a.slice(0, eq);
+      if (python && /^-r[a-zA-Z]+$/.test(a)) { prevFlag = null; continue; }
+      if (python && /^-[qvxslb]{2,}$/.test(a)) { prevFlag = null; continue; } // combined short flags: -xvs
+      if ((name === '--watch' || name === '--watchAll') && a !== name + '=false') return false;
+      if (python && name.startsWith('-p') && name !== '-p' && !name.startsWith('--')) { if (!/^-pno:[\w.-]+$/.test(a)) return false; prevFlag = null; continue; }
+      if (!SAFE_FLAGS.has(name)) return false;
+      if (eq !== -1 && !pathSafe(a.slice(eq + 1))) return false;
+      prevFlag = eq === -1 ? name : null;
+      continue;
+    }
+    if (python && prevFlag === '-p' && !/^no:[\w.-]+$/.test(a) && !a.includes('*')) return false;
+    // make variables (V=1, VERBOSE=1), but none that changes how make runs recipes
+    if (runner === 'make' && /^[A-Z][A-Z0-9_]*=[\w.,:+-]*$/.test(a) && !/^(SHELL|\.SHELLFLAGS|MAKE\w*|MFLAGS|GNUMAKEFLAGS)=/.test(a)) { prevFlag = null; continue; }
+    if (a.includes('=') && !prevFlag) return false;
+    if (!pathSafe(a)) return false;
+    prevFlag = null;
+  }
+  return true;
+}
+
+// The program itself: one of the runners by name, or a project-relative ./...test...sh script.
+const RUNNER_RE = /^(pytest|python3?|npm|pnpm|yarn|node|go|cargo|make|bash|ruff|eslint|tsc|mypy)$/;
+const SCRIPT_RE = /^\.\/[\w./-]*test[\w./-]*\.sh$/;
 
 function commandAllowed(cmd) {
-  if (typeof cmd !== 'string') return false;
-  const trimmed = cmd.trim();
-  if (!trimmed) return false;
-  if (FORBIDDEN_RE.test(trimmed)) return false;
-  return ALLOWLIST_RE.test(trimmed) || IMPORT_SMOKE_RE.test(trimmed);
+  const argv = parseCommand(cmd);
+  if (!argv) return false;
+  if (!RUNNER_RE.test(argv[0]) && !(SCRIPT_RE.test(argv[0]) && pathSafe(argv[0].slice(2)))) return false;
+  if (/^python3?$/.test(argv[0]) && argv[1] === '-c') return argv.length === 3 && IMPORT_SMOKE_RE.test(argv[2].trim());
+  if (!ALLOWLIST_RE.test(argv.join(' '))) return false;
+  // runners whose default action writes: ruff only checks (`ruff check`, `ruff format --check`),
+  // tsc only type-checks (--noEmit), whatever else the flags say
+  if (argv[0] === 'ruff' && argv.length > 1 && argv[1] !== 'check' && !(argv[1] === 'format' && argv.includes('--check'))) return false;
+  if (argv[0] === 'tsc' && !argv.includes('--noEmit')) return false;
+  // the script or target is exactly `test` (or make's `check`): the allowlist's \b would also let
+  // `npm run test-deploy` or `make test install` through, which run other scripts and targets
+  if (/^(npm|pnpm|yarn)$/.test(argv[0]) && !(argv[1] === 'test' || (argv[1] === 'run' && argv[2] === 'test'))) return false;
+  if (argv[0] === 'make' && (!/^(test|check)$/.test(argv[1]) || argv.slice(2).some((a) => !a.startsWith('-') && !a.includes('=')))) return false;
+  if (argv[0] === 'cargo' && !/^(test|check)$/.test(argv[1])) return false;
+  if (argv[0] === 'go' && argv[1] !== 'test') return false;
+  // the runner words themselves (e.g. "python3 -m pytest", "npm run test") are fixed by the allowlist
+  const lead = /^python3?$/.test(argv[0]) && argv[1] === '-m' ? 3 : 1;
+  return argsSafe(argv.slice(lead), argv[0]);
 }
 
 function capBuffer(buf, max) {
@@ -195,16 +363,47 @@ function capBuffer(buf, max) {
   return (b.length > max ? b.slice(0, max) : b).toString('utf8');
 }
 
-// Runs an already-allowlisted command with shell:true, output capped at 64 KB each. Never throws.
+// Runs a command without a shell (argv from parseCommand, globs expanded as bash would), output
+// capped at 64 KB each. notRunnable is set only when xend itself could not start the command
+// (refused, a missing program): a command that ran and exited 126 or 127 is an ordinary failure. On Windows, npm, pnpm, yarn and the tools npm installs (tsc, eslint) are
+// .cmd shims, which only run through cmd.exe; those get a shell, and only when every word is
+// plain. A missing program reports exit 127, as a shell would. Never throws.
 function runVerify(cmd, cwd, timeoutMs) {
   const start = Date.now();
+  const parsed = parseCommand(cmd);
+  if (!parsed) return { exit: 126, notRunnable: true, stdout: '', stderr: 'xend: not a runnable command: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
+  // Expanded names are file paths, never options: a file called "--basetemp=x" becomes
+  // "./--basetemp=x", so a glob cannot smuggle in a flag the allowlist refused. At most
+  // MAX_GLOB_WORDS words in all.
+  const argv = [];
+  for (let i = 0; i < parsed.length; i++) {
+    const a = parsed[i];
+    let words = [a];
+    if (parsed.globs[i] && pathSafe(a)) {
+      try { words = expandGlob(a, cwd || process.cwd()).map((w) => (w !== a && w.startsWith('-') ? './' + w : w)); } catch (_) { words = [a]; }
+    }
+    for (const w of words) argv.push(w);
+    if (argv.length > MAX_GLOB_WORDS) {
+      return { exit: 126, notRunnable: true, stdout: '', stderr: 'xend: glob expands to more than ' + MAX_GLOB_WORDS + ' words: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
+    }
+  }
+  const winShim = process.platform === 'win32' && /^(npm|pnpm|yarn|npx|tsc|eslint)$/i.test(argv[0]);
+  if (winShim && !argv.every((a) => /^[\w.:/@,+=*-]+$/.test(a))) {
+    return { exit: 126, notRunnable: true, stdout: '', stderr: 'xend: not a runnable command on Windows: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
+  }
   let res;
   try {
-    res = spawnSync(cmd, { cwd: cwd || process.cwd(), shell: true, timeout: timeoutMs || 120000, maxBuffer: 16 * 1024 * 1024 });
+    const opts = { cwd: cwd || process.cwd(), timeout: timeoutMs || 120000, maxBuffer: 16 * 1024 * 1024 };
+    res = winShim ? spawnSync(argv.join(' '), Object.assign(opts, { shell: true })) : spawnSync(argv[0], argv.slice(1), opts);
   } catch (e) {
     res = { status: 1, stdout: Buffer.from(''), stderr: Buffer.from(String((e && e.message) || e)), error: e };
   }
   const ms = Date.now() - start;
+  // the program could not be started at all: missing, not executable, busy, or not a valid binary
+  if (res.error && ['ENOENT', 'EACCES', 'ETXTBSY', 'ENOEXEC'].includes(res.error.code)) {
+    const why = res.error.code === 'ENOENT' ? 'command not found' : 'cannot execute (' + res.error.code + ')';
+    return { exit: res.error.code === 'ENOENT' ? 127 : 126, notRunnable: true, stdout: '', stderr: argv[0] + ': ' + why, ms, timedOut: false };
+  }
   const timedOut = !!(res.error && (res.error.code === 'ETIMEDOUT' || res.signal === 'SIGTERM'));
   let exit = res.status;
   if (exit === null || exit === undefined) exit = timedOut ? 124 : 1;
@@ -435,6 +634,7 @@ module.exports = {
   extractReaderEvidence,
   checkCitations,
   parseWorkerReply,
+  parseCommand,
   commandAllowed,
   runVerify,
   verdictFor,

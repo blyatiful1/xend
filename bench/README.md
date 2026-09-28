@@ -76,7 +76,7 @@ node bench/run.js --arms "solo-sonnet:baseline:sonnet,solo-fable:baseline:fable,
   --tasks project-* --tools "Bash,Read,Edit,Write,MultiEdit,Grep,Glob,Agent" --max-budget-usd 5 -j 2
 ```
 
-Every arm in a run gets the same tool allowlist, effort, turn cap, and (per task) budget. Baseline arms get no `XEND_*` environment variables (except `XEND_STATE_DIR`, used only to collect xend's own diagnostics and otherwise inert); xend arms add `XEND_PROFILE` and `XEND_ARCHITECT`. Nothing else differs between arms of the same task.
+Every arm in a run gets the same tool allowlist, effort, turn cap, and (per task) budget. Baseline arms get no `XEND_*` environment variables (except `XEND_STATE_DIR`, used only to collect xend's own diagnostics and otherwise inert); xend arms add `XEND_PROFILE` and `XEND_ARCHITECT`, plus `XEND_TRUST_TESTS=1` whenever the job's `--allowedTools` pre-approves `Bash`: Claude Code would then run the test command without asking, and the hooks, which cannot see CLI flags, get the same answer through xend's user-level opt-in (without it the auto-test would not run on the bench at all). Nothing else differs between arms of the same task.
 
 ### Task-level overrides
 

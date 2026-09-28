@@ -69,6 +69,64 @@ test('project .xend.json overrides profile defaults and can switch profile', () 
   assert.ok(cfg.sources.some((s) => s.endsWith('.xend.json')));
 });
 
+// Runs fn with XDG_CONFIG_HOME pointed at a fresh directory holding `userConfig` (if any), so no
+// test depends on the machine's own ~/.config/xend/config.json.
+function withUserConfig(userConfig, fn) {
+  const xdg = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-xdg-'));
+  if (userConfig) {
+    fs.mkdirSync(path.join(xdg, 'xend'));
+    fs.writeFileSync(path.join(xdg, 'xend', 'config.json'), JSON.stringify(userConfig));
+  }
+  const saved = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = xdg;
+  try { return fn(); } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; }
+}
+
+test('a repository .xend.json cannot turn auto-test on, pick its command, trust it, or stretch its timeouts', () => withUserConfig(null, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-cfg-'));
+  fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({
+    profile: 'lite', trustTestCommands: true,
+    autoTest: { enabled: true, command: 'pytest -p evil', timeoutMs: 600000, maxMs: 600000, maxChars: 800 },
+    architect: { verifyTimeoutMs: 900000 },
+  }));
+  const cfg = config.resolve({ env: {}, cwd: dir });
+  assert.strictEqual(cfg.autoTest.enabled, false, 'lite keeps auto-test off');
+  assert.strictEqual(cfg.autoTest.command, '');
+  assert.strictEqual(cfg.autoTest.timeoutMs, 20000);
+  assert.strictEqual(cfg.autoTest.maxMs, 8000);
+  assert.strictEqual(cfg.autoTest.maxChars, 800, 'harmless keys still apply');
+  assert.strictEqual(cfg.trustTestCommands, false);
+  assert.strictEqual(cfg.architect.verifyTimeoutMs, 120000);
+  assert.deepStrictEqual(cfg.ignoredProjectKeys.sort(), ['architect.verifyTimeoutMs', 'autoTest.command', 'autoTest.enabled', 'autoTest.maxMs', 'autoTest.timeoutMs', 'trustTestCommands']);
+  // turning it off is always allowed
+  fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({ autoTest: { enabled: false } }));
+  assert.strictEqual(config.resolve({ env: {}, cwd: dir }).autoTest.enabled, false);
+}));
+
+test('a repository cannot turn the auto-test on through a truthy value or by choosing a profile', () => withUserConfig({ profile: 'lite' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-cfg-'));
+  for (const repo of [{ autoTest: { enabled: 1 } }, { autoTest: { enabled: 'yes' } }, { profile: 'balanced' }, { profile: 'aggressive', autoTest: { enabled: true } }]) {
+    fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify(repo));
+    assert.strictEqual(config.resolve({ env: {}, cwd: dir }).autoTest.enabled, false, JSON.stringify(repo));
+  }
+  // the user's own choice still works
+  assert.strictEqual(config.resolve({ env: { XEND_AUTOTEST: '1' }, cwd: dir }).autoTest.enabled, true);
+  assert.strictEqual(config.resolve({ env: { XEND_PROFILE: 'balanced' }, cwd: dir }).autoTest.enabled, true);
+}));
+
+test('trustTestCommands comes from the environment or user config; timeouts are capped below the hook timeouts', () => {
+  withUserConfig(null, () => {
+    assert.strictEqual(config.resolve({ env: {}, cwd: os.tmpdir() }).trustTestCommands, false);
+    assert.strictEqual(config.resolve({ env: { XEND_TRUST_TESTS: '1' }, cwd: os.tmpdir() }).trustTestCommands, true);
+    assert.strictEqual(config.resolve({ env: { XEND_TRUST_TESTS: '0' }, cwd: os.tmpdir() }).trustTestCommands, false);
+  });
+  withUserConfig({ trustTestCommands: true, autoTest: { timeoutMs: 600000 } }, () => {
+    const cfg = config.resolve({ env: {}, cwd: os.tmpdir() });
+    assert.strictEqual(cfg.trustTestCommands, true);
+    assert.strictEqual(cfg.autoTest.timeoutMs, config.AUTOTEST_TIMEOUT_CAP_MS);
+  });
+});
+
 test('context block is stable and contains no timestamps', () => {
   const cfg = config.resolve({ env: {}, cwd: os.tmpdir() });
   const a = context.build(cfg, {});
@@ -162,3 +220,12 @@ test('session state dir, overrides, and pruning', () => {
   assert.ok(!fs.existsSync(old));
   assert.ok(fs.existsSync(dir));
 });
+
+test('a profile name inherited from Object.prototype is not a profile (and does not throw)', () => withUserConfig(null, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-cfg-'));
+  for (const name of ['toString', 'constructor', '__proto__', 'valueOf']) {
+    fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({ profile: name }));
+    assert.strictEqual(config.resolve({ env: {}, cwd: dir }).profile, 'balanced', name);
+  }
+  assert.strictEqual(config.resolve({ env: { XEND_PROFILE: 'hasOwnProperty' }, cwd: os.tmpdir() }).profile, 'balanced');
+}));

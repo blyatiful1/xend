@@ -5,15 +5,19 @@
 // session-block rule asking the model to batch the edit and the test in one message did not change
 // what Sonnet does (verified here); a hook does not need the model's cooperation.
 //
-// Safety: only commands that pass verify.commandAllowed run (a configured command included), none
-// that a Claude Code permission rule denies or asks about (blockedByPermissions), never inside
-// subagents, never after Write (a file being created is usually half a feature, and its failing
-// tests are noise), and a suite slower than maxMs switches the feature off for the session.
+// Safety: a test command runs the repository's own code (package.json scripts, conftest.py), and a
+// hook cannot show a permission prompt. So only commands that pass verify.commandAllowed run (a
+// configured command included), and only when Claude Code itself would run them without asking:
+// an allow rule matches, the session is in bypassPermissions mode, or the user opted in at user
+// level (permissions.check; a deny or ask rule always wins). Never inside subagents, never after
+// Write (a file being created is usually half a feature, and its failing tests are noise), and a
+// suite slower than maxMs switches the feature off for the session.
 const fs = require('fs');
 const path = require('path');
 const verify = require('./verify.js');
 const state = require('./state.js');
-const settings = require('./settings.js');
+const permissions = require('./permissions.js');
+const { AUTOTEST_TIMEOUT_CAP_MS } = require('./config.js');
 
 // --tb=no -rfE: one 'FAILED test - message' line per failure, the most compact form that still names
 // what broke; the model runs pytest itself when it needs a traceback.
@@ -78,32 +82,11 @@ function detectRaw(root, file, cfg) {
   return null;
 }
 
-// A Claude Code permission rule for Bash ("Bash", "Bash(npm test:*)", "Bash(pytest *)") tested
-// against a command. Legacy ":*" prefix rules and "*" globs both match.
-function bashRuleMatches(rule, cmd) {
-  const m = /^Bash(?:\((.*)\))?$/.exec(String(rule || '').trim());
-  if (!m) return false;
-  const spec = m[1];
-  if (spec === undefined || spec.trim() === '' || spec.trim() === '*') return true;
-  const pat = spec.trim().endsWith(':*') ? spec.trim().slice(0, -2) + '*' : spec.trim();
-  const re = new RegExp('^' + pat.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
-  const bare = cmd.replace(/^python3?\s+-m\s+/, '');
-  return re.test(cmd) || re.test(bare);
-}
-
-// The hook runs without a permission prompt, so a user who has told Claude Code to deny or ask
-// about this command (or about Bash altogether) keeps that decision: the auto-test stays off.
+// Kept for callers of the earlier API: the rule matcher now lives in permissions.js.
+const bashRuleMatches = permissions.bashRuleMatches;
 function blockedByPermissions(cmd, root) {
-  let layers;
-  try { layers = settings.loadSettingsLayers(root); } catch (_) { return false; }
-  for (const l of [layers.user, layers.project, layers.local]) {
-    const p = l && l.value && l.value.permissions;
-    if (!p) continue;
-    for (const key of ['deny', 'ask']) {
-      for (const rule of Array.isArray(p[key]) ? p[key] : []) if (bashRuleMatches(rule, cmd)) return true;
-    }
-  }
-  return false;
+  const r = permissions.check(cmd, { cwd: root });
+  return r.reason === 'deny' || r.reason === 'ask';
 }
 
 // Keeps the decisive part of a test run within maxChars: failure lines and the summary. Passing
@@ -136,6 +119,8 @@ function signature(text) {
 
 // Runs the command and returns the additionalContext string for the model (or null to stay quiet).
 // `dir` is the session state dir: it holds the last result's signature and the disabled flag.
+// permissionMode is the hook input's permission_mode; trusted is the user-level opt-in. When the
+// command may not run, onBlocked(cmd, result) is called (for a note to the user) and null returned.
 function run(opts) {
   const { root, file, cfg, dir, toolUseId } = opts;
   const ac = cfg || {};
@@ -144,8 +129,12 @@ function run(opts) {
   if (st.disabled) return null;
   const cmd = detectCommand(root, file, ac);
   if (!cmd) return null;
-  if (blockedByPermissions(cmd, root)) return null;
-  const r = verify.runVerify(cmd, root, ac.timeoutMs || 20000);
+  const perm = permissions.check(cmd, { cwd: root, permissionMode: opts.permissionMode, trusted: opts.trusted === true });
+  if (!perm.ok) {
+    if (typeof opts.onBlocked === 'function') opts.onBlocked(cmd, perm);
+    return null;
+  }
+  const r = verify.runVerify(cmd, root, Math.min(ac.timeoutMs || 20000, AUTOTEST_TIMEOUT_CAP_MS));
   const combined = (r.stdout || '') + (r.stderr ? '\n' + r.stderr : '');
   const secs = (r.ms / 1000).toFixed(1) + 's';
   if (r.timedOut || r.ms > (ac.maxMs != null ? ac.maxMs : 8000)) {
@@ -153,7 +142,7 @@ function run(opts) {
     return '[xend] Auto-test switched off for this session: `' + cmd + '` took ' + secs + (r.timedOut ? ' and timed out' : '') + '. Run tests yourself.';
   }
   // A missing runner is not a test result; stay quiet from now on.
-  if (/No module named pytest|command not found|ERR! Missing script/.test(combined) && r.exit !== 0 && !/(passed|failed|error)/i.test(combined.split('\n').slice(-3).join(' '))) {
+  if ((r.exit === 127 || /No module named pytest|command not found|ERR! Missing script/.test(combined)) && r.exit !== 0 && !/(passed|failed|error)/i.test(combined.split('\n').slice(-3).join(' '))) {
     state.writeJson(flagFile, Object.assign(st, { disabled: true, reason: 'no-runner' }));
     return null;
   }

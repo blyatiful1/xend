@@ -163,7 +163,8 @@ function cleanEnv(extra) {
   // CLAUDE_CODE_ENTRYPOINT: a child inheriting the hosting session's entrypoint (e.g. a cloud
   // session's) gets that host's system prompt and side requests instead of a plain `claude -p`'s.
   for (const k of ['CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'XEND_PROFILE', 'XEND_TERSE', 'XEND_SHAPE',
-    'XEND_PONYTAIL', 'XEND_PONYTAIL_TEXT', 'XEND_UPSTREAM_PONYTAIL', 'XEND_PONYTAIL_STRICT', 'PONYTAIL_DEFAULT_MODE', 'XEND_ARCHITECT']) delete env[k];
+    'XEND_PONYTAIL', 'XEND_PONYTAIL_TEXT', 'XEND_UPSTREAM_PONYTAIL', 'XEND_PONYTAIL_STRICT', 'PONYTAIL_DEFAULT_MODE', 'XEND_ARCHITECT',
+    'XEND_TRUST_TESTS', 'XEND_AUTOTEST', 'XEND_AUTOTEST_CMD']) delete env[k];
   return Object.assign(env, extra);
 }
 
@@ -186,6 +187,9 @@ function runClaude(task, arm, opts, work, stateDir) {
     if (opts.ponytailText) extraEnv.XEND_PONYTAIL_TEXT = opts.ponytailText;
     if (opts.ponytailStrict) extraEnv.XEND_PONYTAIL_STRICT = '1';
     extraEnv.XEND_ARCHITECT = arm.mode === 'architect' ? '1' : '0';
+    // --allowedTools pre-approves Bash here, so Claude Code runs test commands without asking; the
+    // hooks cannot see CLI flags, so they get the same answer through the user-level opt-in
+    if (ta.allowedTools.split(',').includes('Bash')) extraEnv.XEND_TRUST_TESTS = '1';
     Object.assign(extraEnv, opts.arm_env);
     if (arm.env) Object.assign(extraEnv, arm.env);
   }

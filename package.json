@@ -1,6 +1,6 @@
 {
   "name": "xend",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Token-efficiency framework for Claude Code",
   "license": "MIT",
   "private": true,

@@ -270,7 +270,7 @@ test('commandAllowed: accepts allowlisted test/lint commands', () => {
     './scripts/run-test.sh',
     'ruff',
     'eslint',
-    'tsc',
+    'tsc --noEmit',
     'mypy',
   ]) {
     assert.equal(verify.commandAllowed(cmd), true, cmd);
@@ -323,6 +323,83 @@ test('commandAllowed: rejects an import smoke check that does anything beyond th
   }
 });
 
+test('commandAllowed: accepts the flags real test and lint runs use', () => {
+  for (const cmd of [
+    'python3 -m pytest -q --tb=no -rfE -p no:cacheprovider',
+    'pytest -k "parse and not slow" tests/test_x.py::test_y -x',
+    'python3 -m unittest discover -s tests -p "test*.py"',
+    'npm test --silent',
+    'npm test -- --runInBand --watch=false',
+    'node --test --test-reporter=spec',
+    'go test -run TestX -count=1 ./...',
+    'cargo test --workspace -- --nocapture',
+    'ruff check src tests',
+    'ruff format --check .',
+    'tsc --noEmit -p tsconfig.json',
+    'pytest -xvs tests',
+    'python3 -m pytest -vs',
+    'pytest --no-cov',
+    'make test V=1',
+    "go test -run '^TestX$' ./...",
+    'pytest -q tests/test_*.py',
+    'pytest -q  # a trailing comment',
+  ]) {
+    assert.equal(verify.commandAllowed(cmd), true, cmd);
+  }
+});
+
+test('commandAllowed: rejects newlines, expansions and flags that write, delete or load outside the test run', () => {
+  for (const cmd of [
+    'npm test\ntouch X',
+    'npm test\r\ntouch X',
+    'pytest -q --basetemp=$HOME',
+    'pytest -q --basetemp=/home/someone',
+    'pytest -q --basetemp=build/tmp',
+    'pytest ~/elsewhere',
+    'pytest ../outside/tests',
+    'pytest -p evil_plugin',
+    'pytest -c /etc/evil.ini',
+    'pytest -o cache_dir=/tmp/x',
+    'pytest --rootdir=/',
+    'pytest --junitxml=report.xml',
+    'go test -exec /bin/sh ./...',
+    'npm test --script-shell=/bin/evil',
+    'node --test --require /tmp/x.js',
+    'eslint --fix src',
+    'ruff format .',
+    'tsc',
+    'tsc -p tsconfig.json',
+    'make test SHELL=/bin/evil',
+    'pytest -k "$X"',
+    'pytest (x)',
+    'make test SHELL=evil',
+    'make test install',
+    'npm run test-deploy',
+    'npm run test:publish',
+    'yarn test-e2e',
+    'pytest-evil -q',
+    './../outside-test.sh',
+    'make test -i',
+    'pytest --collect-only',
+    'npm test --if-present',
+    'node --test --test-only',
+    'npm test -- --passWithNoTests',
+    'npm test -- --watch',
+    'pytest "unterminated',
+    'pytest \\ -q',
+  ]) {
+    assert.equal(verify.commandAllowed(cmd), false, JSON.stringify(cmd));
+  }
+});
+
+test('parseCommand: words and simple quotes, no expansion', () => {
+  assert.deepEqual(Array.from(verify.parseCommand('pytest -k "a and b" x.py')), ['pytest', '-k', 'a and b', 'x.py']);
+  assert.deepEqual(Array.from(verify.parseCommand("python3 -c 'import os'")), ['python3', '-c', 'import os']);
+  assert.deepEqual(verify.parseCommand('pytest tests/test_*.py "q*"').globs, [false, true, false]);
+  assert.equal(verify.parseCommand('pytest $HOME'), null);
+  assert.equal(verify.parseCommand('  '), null);
+});
+
 // ============================================================================
 // runVerify
 // ============================================================================
@@ -336,6 +413,49 @@ test('runVerify: captures exit code and stdout for a real subprocess', () => {
 
   const failing = verify.runVerify('node -e "process.exit(3)"', process.cwd(), 5000);
   assert.equal(failing.exit, 3);
+});
+
+test('runVerify: expands globs as bash does (matches sorted, no match left literal, quoted never expanded)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-rv-glob-'));
+  for (const f of ['tests/test_b.py', 'tests/test_a.py', 'tests/.test_hidden.py', 'tests/other.py']) writeFileDeep(path.join(d, f), '');
+  const r = verify.runVerify("node -e 'console.log(process.argv.slice(1).join())' tests/test_*.py tests/none_*.py 'tests/q*.py'", d, 5000);
+  assert.equal(r.stdout.trim(), 'tests/test_a.py,tests/test_b.py,tests/none_*.py,tests/q*.py');
+  // a file named like a flag comes through as a path, never as an option
+  writeFileDeep(path.join(d, 'x', '--basetemp=evil'), '');
+  const f = verify.runVerify("node -e 'console.log(process.argv.slice(1).join())' x/*", d, 5000);
+  assert.equal(f.stdout.trim(), 'x/--basetemp=evil');
+  const top = verify.runVerify("node -e 'console.log(process.argv.slice(1).join())' --*", path.join(d, 'x'), 5000);
+  assert.equal(top.stdout.trim(), './--basetemp=evil');
+});
+
+test('runVerify: notRunnable only when xend could not start the command, not when it ran and exited 127; a bad glob never throws', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-rv-nr-'));
+  assert.equal(verify.runVerify('definitely-not-a-real-program-xend', d, 5000).notRunnable, true);
+  const ran = verify.runVerify('node -e "process.exit(127)"', d, 5000);
+  assert.equal(ran.exit, 127);
+  assert.equal(ran.notRunnable, undefined);
+  assert.doesNotThrow(() => verify.runVerify("node -e '1' []] [a", d, 5000));
+  // a runner that exists but cannot be executed is "could not start", not a failed check
+  fs.writeFileSync(path.join(d, 'notexec'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+  const nx = verify.runVerify('./notexec', d, 5000);
+  if (process.platform !== 'win32') { assert.equal(nx.notRunnable, true); assert.match(nx.stderr, /cannot execute/); }
+  // "[!]" is not a bracket expression in bash: it stays literal text
+  fs.writeFileSync(path.join(d, 'a'), '');
+  const lit = verify.runVerify("node -e 'console.log(process.argv[1])' [!]", d, 5000);
+  assert.equal(lit.stdout.trim(), '[!]');
+});
+
+test('runVerify: runs without a shell; a missing program is exit 127, a shell-looking command is never run', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-rv-'));
+  const missing = verify.runVerify('definitely-not-a-real-program-xend --x', d, 5000);
+  assert.equal(missing.exit, 127);
+  assert.match(missing.stderr, /command not found/);
+  const refused = verify.runVerify('node -e "1"\ntouch SENTINEL', d, 5000);
+  assert.equal(refused.exit, 126);
+  assert.equal(fs.existsSync(path.join(d, 'SENTINEL')), false);
+  // "$HOME" reaches the program as literal text: no shell expands it
+  const lit = verify.runVerify("node -e 'console.log(process.argv[1])' literal", d, 5000);
+  assert.equal(lit.stdout.trim(), 'literal');
 });
 
 // ============================================================================
@@ -609,14 +729,25 @@ test('recordLaunch: caps the registry at the 200 most recent entries', () => {
 // end-to-end: node scripts/subagent-stop.js (and scripts/agent-launch.js)
 // ============================================================================
 
+// No user settings from the machine running the tests: permission rules come only from what
+// each test writes (managed settings cannot be redirected, by design; CI machines have none).
+const HERMETIC_ENV = {
+  CLAUDE_CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-verify-home-')),
+  HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-verify-realhome-')),
+  XDG_CONFIG_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-verify-xdg-')),
+  // the user-level opt-in, so the verifier's own behaviour can be tested; permission tests override it
+  XEND_TRUST_TESTS: '1',
+};
+
 function runHook(scriptPath, input, env) {
   // Strip NODE_TEST_CONTEXT: this test suite itself runs under `node --test`, and that env var
   // would otherwise leak into a fixture's own `node --test ...` verify command (run as a
   // grandchild by scripts/lib/verify.js's runVerify), making it behave as a v8-serialized child
   // reporter instead of a normal process. Production hook invocations never run inside a test
   // runner, so this only matters for the fixtures here.
-  const childEnv = Object.assign({}, process.env, env);
+  const childEnv = Object.assign({}, process.env, HERMETIC_ENV, env);
   delete childEnv.NODE_TEST_CONTEXT;
+  delete childEnv.CLAUDE_PROJECT_DIR;
   return spawnSync(process.execPath, [scriptPath], {
     input: JSON.stringify(input),
     encoding: 'utf8',
@@ -636,6 +767,9 @@ function stateDirFor(stateBase, sessionId) {
   return path.join(stateBase, sessionId);
 }
 
+// The session's cached config.json is written as SessionStart would; the hook no longer takes
+// trust or timeouts from it (the model may be able to write that file), so tests set
+// XEND_TRUST_TESTS through runHook's environment instead.
 function writeSessionSetup(dir, planTasks) {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ architect: { verify: true, blockOnMismatch: true, verifyTimeoutMs: 10000 } }));
@@ -776,6 +910,124 @@ test('e2e (d): a command containing ";" is never executed', () => {
     assert.equal(rec.claimed, 'PASS');
     assert.equal(rec.blocked, false); // unverifiable is never blocked
     assert.equal(rec.lookup, 'transcript');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(stateBase, { recursive: true, force: true });
+  }
+});
+
+function sentinelTask(cwd, id) {
+  // an allowlisted verify command whose only effect is to create SENTINEL: proof it ran
+  writeFileDeep(path.join(cwd, 'tests', 'sentinel.test.js'), "require('fs').writeFileSync('SENTINEL', '1');\n");
+  return { id, title: 't', tier: 'worker', files: ['src/thing.py'], testFiles: [], deps: [],
+    spec: 's', verify: 'node tests/sentinel.test.js', status: 'todo', attempts: 0, verified: false, lastVerdict: '', scopeWarnings: [] };
+}
+
+test('e2e: with no allow rule, no trust and no bypass, a builder\'s check is not run and the user gets one note', () => {
+  const { cwd, stateBase } = setupProject();
+  try {
+    const dir = stateDirFor(stateBase, 'sess-perm');
+    writeSessionSetup(dir, [sentinelTask(cwd, 'T1')]);
+    // a cached config.json claiming trust (the model could have written it) changes nothing
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ trustTestCommands: true, architect: { verify: true } }));
+    const input = {
+      session_id: 'sess-perm', cwd, agent_id: 'agent-p', agent_type: 'xend:xend-worker',
+      last_assistant_message: passReplyTextWithTask('T1', 'echo unused'), stop_hook_active: false,
+    };
+    const untrusted = { XEND_STATE_DIR: stateBase, XEND_TRUST_TESTS: '0' };
+    const res = runHook(SUBAGENT_STOP, input, untrusted);
+    assert.equal(fs.existsSync(path.join(cwd, 'SENTINEL')), false, 'must not run without permission');
+    const out = JSON.parse(res.stdout);
+    assert.match(out.systemMessage, /add Bash\(node tests\/sentinel\.test\.js\) to permissions\.allow/);
+    const rec = JSON.parse(fs.readFileSync(path.join(dir, 'verify.jsonl'), 'utf8').trim().split('\n').pop());
+    assert.equal(rec.verdict, 'unverifiable');
+    assert.equal(rec.skipped, 'no-rule');
+    // the note is shown once per session
+    const again = runHook(SUBAGENT_STOP, input, untrusted);
+    assert.equal((again.stdout || '').trim(), '');
+
+    // bypassPermissions mode: Claude Code would run it without asking, so xend does too
+    runHook(SUBAGENT_STOP, Object.assign({}, input, { permission_mode: 'bypassPermissions' }), untrusted);
+    assert.equal(fs.existsSync(path.join(cwd, 'SENTINEL')), true);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(stateBase, { recursive: true, force: true });
+  }
+});
+
+test('e2e: a check that runs and exits 127 itself is a mismatch (blocked), not "could not run"', () => {
+  const { cwd, stateBase } = setupProject();
+  try {
+    const dir = stateDirFor(stateBase, 'sess-127');
+    writeFileDeep(path.join(cwd, 'tests', 'missing-tool.test.js'), 'process.exit(127);\n');
+    const t = sentinelTask(cwd, 'T1');
+    t.verify = 'node tests/missing-tool.test.js';
+    writeSessionSetup(dir, [t]);
+    const res = runHook(SUBAGENT_STOP, {
+      session_id: 'sess-127', cwd, agent_id: 'agent-127', agent_type: 'xend:xend-worker',
+      last_assistant_message: passReplyTextWithTask('T1', 'echo unused'), stop_hook_active: false,
+    }, { XEND_STATE_DIR: stateBase });
+    assert.equal(JSON.parse(res.stdout).decision, 'block');
+    const rec = JSON.parse(fs.readFileSync(path.join(dir, 'verify.jsonl'), 'utf8').trim().split('\n').pop());
+    assert.equal(rec.verdict, 'mismatch');
+    assert.equal(rec.exit, 127);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(stateBase, { recursive: true, force: true });
+  }
+});
+
+test('e2e: an allow rule lets the check run; a deny rule wins even over trust', () => {
+  for (const [key, trust, runs] of [['allow', false, true], ['deny', true, false], ['ask', true, false]]) {
+    const { cwd, stateBase } = setupProject();
+    try {
+      const dir = stateDirFor(stateBase, 'sess-rule');
+      writeSessionSetup(dir, [sentinelTask(cwd, 'T1')]);
+      writeFileDeep(path.join(cwd, '.claude', 'settings.json'), JSON.stringify({ permissions: { [key]: ['Bash(node tests/sentinel.test.js)'] } }));
+      runHook(SUBAGENT_STOP, {
+        session_id: 'sess-rule', cwd, agent_id: 'agent-r', agent_type: 'xend:xend-worker',
+        last_assistant_message: passReplyTextWithTask('T1', 'echo unused'), stop_hook_active: false,
+      }, { XEND_STATE_DIR: stateBase, XEND_TRUST_TESTS: trust ? '1' : '0' });
+      assert.equal(fs.existsSync(path.join(cwd, 'SENTINEL')), runs, key);
+      const rec = JSON.parse(fs.readFileSync(path.join(dir, 'verify.jsonl'), 'utf8').trim().split('\n').pop());
+      assert.equal(rec.skipped, runs ? null : key, key);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+      fs.rmSync(stateBase, { recursive: true, force: true });
+    }
+  }
+});
+
+test('e2e: a non-xend agent is ignored without any wait when the session has no plan, even with a Task: line', () => {
+  const { cwd, stateBase } = setupProject();
+  try {
+    const dir = stateDirFor(stateBase, 'sess-noplan');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ trustTestCommands: true, architect: { verify: true } }));
+    writeFileDeep(path.join(cwd, 'tests', 'sentinel.test.js'), "require('fs').writeFileSync('SENTINEL', '1');\n");
+    const res = runHook(SUBAGENT_STOP, {
+      session_id: 'sess-noplan', cwd, agent_id: 'agent-gp', agent_type: 'general-purpose',
+      last_assistant_message: passReplyTextWithTask('T1', 'node tests/sentinel.test.js'), stop_hook_active: false,
+    }, { XEND_STATE_DIR: stateBase });
+    assert.equal((res.stdout || '').trim(), '');
+    assert.equal(fs.existsSync(path.join(cwd, 'SENTINEL')), false);
+    assert.equal(fs.existsSync(path.join(dir, 'verify.jsonl')), false);
+    // a plain reply with no Task: line is the case that used to wait for the launch registry (3 x 200 ms)
+    const started = Date.now();
+    runHook(SUBAGENT_STOP, {
+      session_id: 'sess-noplan', cwd, agent_id: 'agent-gp0', agent_type: 'general-purpose',
+      last_assistant_message: 'Done.', stop_hook_active: false,
+    }, { XEND_STATE_DIR: stateBase });
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 450, 'no registry wait expected, took ' + elapsed + 'ms');
+
+    // with a plan, a Task: id that is not one of its tasks is ignored as well
+    writeSessionSetup(dir, [sentinelTask(cwd, 'T7')]);
+    runHook(SUBAGENT_STOP, {
+      session_id: 'sess-noplan', cwd, agent_id: 'agent-gp2', agent_type: 'general-purpose',
+      last_assistant_message: passReplyTextWithTask('T1', 'node tests/sentinel.test.js'), stop_hook_active: false,
+    }, { XEND_STATE_DIR: stateBase });
+    assert.equal(fs.existsSync(path.join(cwd, 'SENTINEL')), false);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(stateBase, { recursive: true, force: true });

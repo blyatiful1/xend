@@ -10,6 +10,7 @@ const path = require('path');
 const readline = require('readline');
 
 const transcript = require('./lib/transcript');
+const state = require('./lib/state.js');
 
 // --- CLI args ----------------------------------------------------------------
 
@@ -21,6 +22,7 @@ function parseArgs(argv) {
     else if (a === '--cwd') args.cwd = argv[++i];
     else if (a === '--json') args.json = true;
     else if (a === '--last') args.last = Number(argv[++i]);
+    else if (a === '--data') args.data = argv[++i];
     else if (a.startsWith('--session=')) args.session = a.slice('--session='.length);
     else if (a.startsWith('--cwd=')) args.cwd = a.slice('--cwd='.length);
     else if (a.startsWith('--last=')) args.last = Number(a.slice('--last='.length));
@@ -112,6 +114,9 @@ function bucketPromptSizes(promptSizes, bucketCount) {
 
 function shapingLogCandidates(sessionId, env) {
   const candidates = [];
+  // where this session's hooks actually wrote (the SessionStart pointer), first
+  const found = sessionId ? state.findSessionDir(sessionId, env) : null;
+  if (found) candidates.push(path.join(found, 'shaping.jsonl'));
   if (env.XEND_STATE_DIR) {
     candidates.push(path.join(env.XEND_STATE_DIR, 'shaping.jsonl'));
     if (sessionId) candidates.push(path.join(env.XEND_STATE_DIR, sessionId, 'shaping.jsonl'));
@@ -120,7 +125,8 @@ function shapingLogCandidates(sessionId, env) {
     candidates.push(path.join(env.CLAUDE_PLUGIN_DATA, 'sessions', sessionId, 'shaping.jsonl'));
   }
   if (sessionId) {
-    candidates.push(path.join(env.TMPDIR || os.tmpdir(), 'xend', sessionId, 'shaping.jsonl'));
+    candidates.push(path.join(state.tmpBase(), state.safeId(sessionId), 'shaping.jsonl'));
+    candidates.push(path.join(env.TMPDIR || os.tmpdir(), 'xend', sessionId, 'shaping.jsonl')); // before 0.3.0
   }
   return candidates;
 }
@@ -184,6 +190,9 @@ async function summarizeShapingLog(filePath) {
 
 function verifyLogCandidates(sessionId, env) {
   const candidates = [];
+  // where this session's hooks actually wrote (the SessionStart pointer), first
+  const found = sessionId ? state.findSessionDir(sessionId, env) : null;
+  if (found) candidates.push(path.join(found, 'verify.jsonl'));
   if (env.XEND_STATE_DIR) {
     candidates.push(path.join(env.XEND_STATE_DIR, 'verify.jsonl'));
     if (sessionId) candidates.push(path.join(env.XEND_STATE_DIR, sessionId, 'verify.jsonl'));
@@ -192,7 +201,8 @@ function verifyLogCandidates(sessionId, env) {
     candidates.push(path.join(env.CLAUDE_PLUGIN_DATA, 'sessions', sessionId, 'verify.jsonl'));
   }
   if (sessionId) {
-    candidates.push(path.join(env.TMPDIR || os.tmpdir(), 'xend', sessionId, 'verify.jsonl'));
+    candidates.push(path.join(state.tmpBase(), state.safeId(sessionId), 'verify.jsonl'));
+    candidates.push(path.join(env.TMPDIR || os.tmpdir(), 'xend', sessionId, 'verify.jsonl')); // before 0.3.0
   }
   return candidates;
 }
@@ -411,6 +421,8 @@ function truncateLabel(s, n) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  // skills pass the substituted ${CLAUDE_PLUGIN_DATA}; the Bash tool that runs them lacks it
+  if (args.data && !args.data.includes('${') && path.isAbsolute(args.data)) process.env.CLAUDE_PLUGIN_DATA = args.data;
   const cwd = args.cwd ? path.resolve(args.cwd) : process.cwd();
   const resolved = transcript.resolveTranscriptPath({ session: args.session, cwd, env: process.env });
 

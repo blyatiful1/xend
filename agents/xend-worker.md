@@ -26,6 +26,8 @@ Reply format (no other text):
   Verification: <command> -> <exact summary line of its output>
   Notes: <anything the caller must know: assumptions, follow-ups, or the ambiguity that blocked you>
 
+The Verification command is re-run by xend exactly as written, without a shell: one test or check command (`pytest ...`, `npm test`, `node --test ...`, `go test ...`, `cargo test`, `make test`, `ruff check ...`, `tsc --noEmit ...`), no pipes, `&&` or redirects. Anything else is recorded as unverified.
+
 The Task line lets xend match your result to the right plan task even when it cannot yet see your launch record; omit it if your brief carried no task id.
 
 On FAIL or BLOCKED, list every file you modified under Changed so the caller can revert them; never leave a half-applied change unmentioned.

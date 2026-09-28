@@ -54,10 +54,11 @@ function main() {
   const overrides = state.sessionOverrides(dir);
   if (overrides.architect === false) return;
 
-  // condition 1 (config half): architect and its gate must both be enabled
+  // condition 1 (config half): architect and its gate must both be enabled; /xend:plan on
+  // (architect: true) turns it on for this session whatever the profile says
   const cfg = state.readJson(path.join(dir, 'config.json'), null) || config.resolve({ cwd: input.cwd });
   const arch = cfg.architect || {};
-  if (!arch.enabled || arch.gate === false) return;
+  if (!(arch.enabled || overrides.architect === true) || arch.gate === false) return;
 
   // condition 2: a plan means the architect is already doing a self task or a fix
   if (fs.existsSync(path.join(dir, 'plan.json'))) return;

@@ -135,23 +135,37 @@ own system prompt tells the model to call dependent tools sequentially)*, so xen
 mechanically. `scripts/record-edit.js` (PostToolUse on `Edit|MultiEdit`, main session only) calls
 `scripts/lib/autotest.js`, which:
 
-1. picks a command: a configured `autoTest.command`, else `python3 -m pytest -q --tb=line -p
-   no:cacheprovider` when Python tests exist within three directory levels, else `npm test
-   --silent` when `package.json` defines a real test script, else `node --test` when `*.test.js`
-   files exist. Documentation edits never trigger a run. Every command, configured ones included,
-   must pass `verify.commandAllowed` (the same allowlist the SubagentStop verifier uses), and a
-   Bash rule in the user's `permissions.deny` or `permissions.ask` (any settings layer) that matches
-   the command, or a bare `Bash`, keeps it from running: a hook bypasses the permission prompt, so
-   the user's own rules decide;
-2. runs it with a hard timeout (20 s) and switches itself off for the session when a run takes
-   longer than `autoTest.maxMs` (8 s), saying so once;
-3. hands the model one `additionalContext` note: the command, exit code, the failure lines and
+1. picks a command: a configured `autoTest.command` (user config or environment only, never a
+   repository's `.xend.json`), else `python3 -m pytest -q --tb=no -rfE -p no:cacheprovider` when
+   Python tests exist within three directory levels, else `npm test --silent` when `package.json`
+   defines a real test script, else `node --test --test-reporter=spec` when `*.test.js` files
+   exist. Documentation edits never trigger a run. Every command, configured ones included, must
+   pass `verify.commandAllowed` (the same allowlist of runners and flags the SubagentStop verifier
+   uses);
+2. asks `scripts/lib/permissions.js` whether Claude Code would run it without a prompt, since a
+   test command runs the repository's own code and a hook cannot ask: an allow rule matches it,
+   the hook input's `permission_mode` is `bypassPermissions`, or the user opted in at user level
+   (`trustTestCommands`, `XEND_TRUST_TESTS=1`, resolved when the hook runs, never read from the
+   session's cached config). A deny or ask rule in any layer (managed `managed-settings.json` and
+   `managed-settings.d/`, user under `CLAUDE_CONFIG_DIR` and `~/.claude`, project and local under
+   `CLAUDE_PROJECT_DIR`, the git root and the current directory) always wins. Allow rules count
+   only where Claude Code reads them (managed, user, project root; only managed ones under
+   `allowManagedPermissionRulesOnly`) and match literally; aliases such as `python -m pytest` for
+   `pytest` only widen deny and ask rules. When the answer is no, the model gets nothing and
+   the user one `systemMessage` per session naming the allow rule to add (the model never sees
+   it: verified against Claude Code 2.1.283 through a local stand-in for the API);
+3. runs it without a shell (argv from `verify.parseCommand`), with a hard timeout (20 s, capped
+   at 25 s under the hook's 30 s), and switches itself off for the session when a run takes
+   longer than `autoTest.maxMs` (8 s), saying so once; a missing runner (exit 127) switches it
+   off quietly;
+4. hands the model one `additionalContext` note: the command, exit code, the failure lines and
    summary (passing rows and runtime stack frames dropped, capped at 1,200 characters, original
    saved when longer), and on a pass "do not re-run it to confirm". A result identical to the
    previous auto-test (timings ignored) collapses to one line.
 
 It never runs after `Write` (a file being created is usually half a feature, and its failing tests
-are noise), never inside subagents, and is off in `lite`.
+are noise), never inside subagents (`agent_id` set; `agent_type` alone also marks the main thread
+of a `claude --agent` session, which gets the auto-test), and is off in `lite`.
 
 ## Delegation (L3)
 
@@ -226,8 +240,11 @@ model. Steps:
 1. Return immediately if `architect.verify` is `false` or `XEND_VERIFY=0`.
 2. Classify the agent by its (namespace-stripped) `agent_type`: `xend-scout`/`xend-reader`/
    `xend-reviewer` get a citation check only; `xend-worker`/`xend-worker-lite` get a citation check
-   plus a verification check; any other agent is treated as a worker only if its first prompt
-   carries an `[xend task <id>]` tag, otherwise the hook returns without acting.
+   plus a verification check. Any other agent returns at once unless the session has a plan; then
+   it is treated as a worker only when its task id (the reply's `Task:` line, the launch registry,
+   or an `[xend task <id>]` tag in its first prompt) names a task of that plan. So an Explore or
+   general-purpose subagent in a session without a plan costs one file read, not the registry
+   wait.
 3. **Citation check** (every kind): every `path:LINE` or `path:START-END` token in the reply must
    name a file that exists and a line within its length; reader evidence bullets must also quote
    text that is actually on the cited line.
@@ -235,8 +252,14 @@ model. Steps:
    reply. A missing `Result` or `Verification` is `malformed`. The plan task's own `verify` command
    is the contract and overrides whatever the builder wrote. The command is checked against a
    fixed allowlist of test/lint/typecheck runners (`pytest`, `npm test`, `go test`, `cargo test`,
-   `tsc`, `eslint`, …) and against a forbidden-character set (`; & | < > `` $(`); only an allowlisted,
-   metacharacter-free command is ever run, with `cwd`, a capped timeout, and capped output.
+   `tsc --noEmit`, `ruff check`, `eslint`, …; npm/pnpm/yarn only the `test` script, make only
+   `test`/`check`, since the default actions of `tsc` and `ruff format` write files), a
+   forbidden-character set (`; & | < > `` $ \ % ^`, newlines), an
+   allowlist of flags (so no `--basetemp`, `-c`, `-o`, `--junitxml`, `-exec`, `--require`, `--fix`),
+   and a path check (no absolute, `~` or `..` paths). It then goes through the same permission
+   check as the auto-test (L4b step 2): it runs only if Claude Code would run it without asking;
+   otherwise the verdict is `unverifiable` and the user gets one note naming the allow rule. An
+   accepted command runs without a shell, with `cwd`, a capped timeout, and capped output.
 5. **Verdicts**: `pass` (claimed PASS, re-run exit 0), `mismatch` (claimed PASS, re-run non-zero),
    `fail` (claimed FAIL/BLOCKED), `unverifiable` (command not allowlisted, or no re-run possible),
    `malformed`, `bad-citations`.

@@ -10,12 +10,20 @@ const autotest = require('../scripts/lib/autotest.js');
 // The CI unit-test job has Node but not pytest; the pytest-backed cases run wherever it exists.
 const NO_PYTEST = spawnSync('python3', ['-c', 'import pytest'], { stdio: 'ignore' }).status !== 0 && 'pytest not installed';
 
+// No user settings from the machine running the tests: permission rules come only from what each
+// test writes into its project (managed settings cannot be redirected, by design).
+process.env.CLAUDE_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-home-'));
+process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-realhome-')); // ~/.claude deny rules count too
+delete process.env.CLAUDE_PROJECT_DIR;
+
 // node --test marks its children with NODE_TEST_CONTEXT; a nested `node --test` started by the
 // hook would inherit it and skip its files, so each run() call here gets it removed temporarily.
+// trusted (the user-level opt-in) defaults to true here so that run()'s own behaviour is tested;
+// the permission tests below pass it explicitly.
 function run(opts) {
   const saved = process.env.NODE_TEST_CONTEXT;
   delete process.env.NODE_TEST_CONTEXT;
-  try { return autotest.run(opts); } finally { if (saved !== undefined) process.env.NODE_TEST_CONTEXT = saved; }
+  try { return autotest.run(Object.assign({ trusted: true }, opts)); } finally { if (saved !== undefined) process.env.NODE_TEST_CONTEXT = saved; }
 }
 
 function tmp(files) {
@@ -109,25 +117,149 @@ test('run: a pytest failure is reported as compact FAILED lines plus the summary
   assert.ok(!r.includes('short test summary info'), r);
 });
 
-test('bashRuleMatches: bare Bash, prefix and glob rules, python -m aliasing', () => {
+test('bashRuleMatches: bare Bash, prefix and glob rules as Claude Code matches them; aliases only widen deny/ask', () => {
   const cmd = autotest.PY_CMD;
   assert.ok(autotest.bashRuleMatches('Bash', cmd));
   assert.ok(autotest.bashRuleMatches('Bash(*)', cmd));
   assert.ok(autotest.bashRuleMatches('Bash(python3 -m pytest:*)', cmd));
-  assert.ok(autotest.bashRuleMatches('Bash(pytest:*)', cmd), 'a pytest rule covers python3 -m pytest');
   assert.ok(autotest.bashRuleMatches('Bash(npm test *)', 'npm test --silent'));
   assert.ok(!autotest.bashRuleMatches('Bash(npm run build:*)', 'npm test --silent'));
   assert.ok(!autotest.bashRuleMatches('Read', cmd));
   assert.ok(!autotest.bashRuleMatches('Bash(git push:*)', cmd));
+  // literal for allow rules: Claude Code would not match these
+  assert.ok(!autotest.bashRuleMatches('Bash(pytest:*)', cmd));
+  assert.ok(!autotest.bashRuleMatches('Bash(python -m pytest:*)', cmd));
+  assert.ok(!autotest.bashRuleMatches('Bash(npm run test:*)', 'npm test --silent'));
+  assert.ok(!autotest.bashRuleMatches('Bash(npm test*)', 'npm run test-deploy'));
+  // loose (deny and ask): the same runner under another spelling is still covered
+  assert.ok(autotest.bashRuleMatches('Bash(pytest:*)', cmd, { loose: true }));
+  assert.ok(autotest.bashRuleMatches('Bash(python -m pytest:*)', cmd, { loose: true }));
+  assert.ok(autotest.bashRuleMatches('Bash(npm test:*)', 'npm test'));
+  assert.ok(!autotest.bashRuleMatches('Bash(npm test:*)', 'npm testing'), 'a :* prefix is whole words');
+  assert.ok(!autotest.bashRuleMatches('Bash(npm test)', 'npm test --silent'), 'no :* means exact');
+  assert.ok(autotest.bashRuleMatches('Bash(npm test *)', 'npm test'), 'a single trailing " *" also covers the bare command');
 });
 
-test('run: a deny or ask rule for the command in project settings keeps the auto-test off', () => {
+test('run: a deny or ask rule for the command in project settings keeps the auto-test off, even when trusted', () => {
   for (const key of ['deny', 'ask']) {
     const d = tmp({ 'a.js': '', 'a.test.js': 'require("assert").strictEqual(1, 1);\n', '.claude/settings.json': JSON.stringify({ permissions: { [key]: ['Bash(node --test:*)'] } }) });
     const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
-    assert.strictEqual(run({ root: d, file: path.join(d, 'a.js'), cfg: {}, dir: stateDir, toolUseId: 't1' }), null, key);
+    assert.strictEqual(run({ root: d, file: path.join(d, 'a.js'), cfg: {}, dir: stateDir, toolUseId: 't1', trusted: true }), null, key);
   }
-  const allowed = tmp({ 'a.js': '', 'a.test.js': 'require("assert").strictEqual(1, 1);\n', '.claude/settings.json': JSON.stringify({ permissions: { allow: ['Bash(node --test:*)'] } }) });
+});
+
+test('run: without an allow rule, trust or bypass mode nothing runs and onBlocked names the command', () => {
+  const marker = 'require("fs").writeFileSync("RAN", "1");\n';
+  const d = tmp({ 'a.js': '', 'a.test.js': marker });
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
-  assert.ok(run({ root: allowed, file: path.join(allowed, 'a.js'), cfg: {}, dir: stateDir, toolUseId: 't1' }));
+  let blocked = null;
+  const r = run({ root: d, file: path.join(d, 'a.js'), cfg: {}, dir: stateDir, toolUseId: 't1', trusted: false, onBlocked: (cmd, perm) => { blocked = { cmd, perm }; } });
+  assert.strictEqual(r, null);
+  assert.strictEqual(fs.existsSync(path.join(d, 'RAN')), false, 'the repository\'s test code must not run');
+  assert.strictEqual(blocked.cmd, 'node --test --test-reporter=spec');
+  assert.strictEqual(blocked.perm.reason, 'no-rule');
+});
+
+test('run: an allow rule (any spelling Claude Code writes) or bypassPermissions mode lets it run', () => {
+  for (const rule of ['Bash(node --test:*)', 'Bash(node --test *)', 'Bash']) {
+    const d = tmp({ 'a.js': '', 'a.test.js': 'require("assert").strictEqual(1, 1);\n', '.claude/settings.local.json': JSON.stringify({ permissions: { allow: [rule] } }) });
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
+    assert.ok(run({ root: d, file: path.join(d, 'a.js'), cfg: {}, dir: stateDir, toolUseId: 't1', trusted: false }), rule);
+  }
+  const d = tmp({ 'a.js': '', 'a.test.js': 'require("assert").strictEqual(1, 1);\n' });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
+  assert.ok(run({ root: d, file: path.join(d, 'a.js'), cfg: {}, dir: stateDir, toolUseId: 't1', trusted: false, permissionMode: 'bypassPermissions' }));
+});
+
+test('run: user-level (CLAUDE_CONFIG_DIR) and project-root rules apply when the hook runs from a subdirectory', () => {
+  const d = tmp({ 'sub/a.js': '', 'sub/a.test.js': 'require("assert").strictEqual(1, 1);\n', '.claude/settings.json': JSON.stringify({ permissions: { deny: ['Bash(node --test:*)'] } }) });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
+  process.env.CLAUDE_PROJECT_DIR = d;
+  try {
+    assert.strictEqual(run({ root: path.join(d, 'sub'), file: path.join(d, 'sub', 'a.js'), cfg: {}, dir: stateDir, toolUseId: 't1' }), null, 'project deny from the root');
+  } finally { delete process.env.CLAUDE_PROJECT_DIR; }
+  const userDir = process.env.CLAUDE_CONFIG_DIR;
+  fs.writeFileSync(path.join(userDir, 'settings.json'), JSON.stringify({ permissions: { allow: ['Bash(node --test:*)'] } }));
+  try {
+    const e = tmp({ 'a.js': '', 'a.test.js': 'require("assert").strictEqual(1, 1);\n' });
+    assert.ok(run({ root: e, file: path.join(e, 'a.js'), cfg: {}, dir: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-')), toolUseId: 't1', trusted: false }));
+  } finally { fs.rmSync(path.join(userDir, 'settings.json')); }
+});
+
+test('run: a missing runner (exit 127) switches auto-test off for the session', () => {
+  const d = tmp({ 'a.py': '', 'test_a.py': '' });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
+  const savedPath = process.env.PATH;
+  process.env.PATH = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-nopath-'));
+  let r;
+  try { r = run({ root: d, file: path.join(d, 'a.py'), cfg: { command: 'pytest -q' }, dir: stateDir, toolUseId: 't1' }); }
+  finally { process.env.PATH = savedPath; }
+  assert.strictEqual(r, null);
+  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(stateDir, 'autotest.json'), 'utf8')).reason, 'no-runner');
+});
+
+test('permissions: managed deny rules win over everything, and the managed dir is not taken from the environment', () => {
+  const permissions = require('../scripts/lib/permissions.js');
+  const managed = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-managed-'));
+  fs.writeFileSync(path.join(managed, 'managed-settings.json'), JSON.stringify({ permissions: { deny: ['Bash(npm test:*)'] } }));
+  const d = tmp({ '.claude/settings.json': JSON.stringify({ permissions: { allow: ['Bash(npm test:*)'] } }) });
+  const r = permissions.check('npm test --silent', { cwd: d, managedDir: managed, trusted: true, permissionMode: 'bypassPermissions' });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'deny');
+  process.env.XEND_MANAGED_SETTINGS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-empty-'));
+  try { assert.notStrictEqual(permissions.managedDir(), process.env.XEND_MANAGED_SETTINGS_DIR); }
+  finally { delete process.env.XEND_MANAGED_SETTINGS_DIR; }
+});
+
+test('permissions: allow rules come only from the project root, a nested repo can add deny rules but not allow ones', () => {
+  const permissions = require('../scripts/lib/permissions.js');
+  const d = tmp({
+    'third_party/cloned/.claude/settings.json': JSON.stringify({ permissions: { allow: ['Bash(node --test:*)'] } }),
+    'third_party/denying/.claude/settings.json': JSON.stringify({ permissions: { deny: ['Bash(node --test:*)'] } }),
+    '.claude/settings.local.json': JSON.stringify({ permissions: { allow: ['Bash(node --test:*)'] } }),
+  });
+  process.env.CLAUDE_PROJECT_DIR = d;
+  try {
+    const nested = permissions.check('node --test', { cwd: path.join(d, 'third_party', 'cloned') });
+    assert.strictEqual(nested.ok, true);
+    assert.ok(nested.path.startsWith(path.join(d, '.claude')), 'the allow came from the project root: ' + nested.path);
+    assert.strictEqual(permissions.check('node --test', { cwd: path.join(d, 'third_party', 'denying') }).reason, 'deny');
+  } finally { delete process.env.CLAUDE_PROJECT_DIR; }
+  const bare = tmp({ 'vendor/x/.claude/settings.json': JSON.stringify({ permissions: { allow: ['Bash'] } }) });
+  process.env.CLAUDE_PROJECT_DIR = bare;
+  try { assert.strictEqual(permissions.check('node --test', { cwd: path.join(bare, 'vendor', 'x') }).ok, false); }
+  finally { delete process.env.CLAUDE_PROJECT_DIR; }
+});
+
+test('permissions: allowManagedPermissionRulesOnly leaves only managed allow rules; ~/.claude deny rules survive CLAUDE_CONFIG_DIR', () => {
+  const permissions = require('../scripts/lib/permissions.js');
+  const managed = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-managed-'));
+  fs.writeFileSync(path.join(managed, 'managed-settings.json'), JSON.stringify({ allowManagedPermissionRulesOnly: true }));
+  const d = tmp({ '.claude/settings.json': JSON.stringify({ permissions: { allow: ['Bash(npm test:*)'] } }) });
+  assert.strictEqual(permissions.check('npm test', { cwd: d, managedDir: managed }).ok, false);
+  fs.mkdirSync(path.join(process.env.HOME, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(process.env.HOME, '.claude', 'settings.json'), JSON.stringify({ permissions: { deny: ['Bash(npm test:*)'], allow: ['Bash(make test:*)'] } }));
+  try {
+    const e = tmp({});
+    assert.strictEqual(permissions.check('npm test', { cwd: e, trusted: true }).reason, 'deny');
+    assert.strictEqual(permissions.check('make test', { cwd: e }).ok, false, 'its allow rules do not count while CLAUDE_CONFIG_DIR points elsewhere');
+  } finally { fs.rmSync(path.join(process.env.HOME, '.claude'), { recursive: true, force: true }); }
+});
+
+test('permissions: the suggested rule never approves a bare interpreter', () => {
+  const permissions = require('../scripts/lib/permissions.js');
+  assert.strictEqual(permissions.suggestRule('python3 -m pytest -q --tb=no'), 'Bash(python3 -m pytest:*)');
+  assert.strictEqual(permissions.suggestRule('npm test --silent'), 'Bash(npm test:*)');
+  assert.strictEqual(permissions.suggestRule('node --test --test-reporter=spec'), 'Bash(node --test:*)');
+  assert.strictEqual(permissions.suggestRule('python3 -c "import mypkg"'), 'Bash(python3 -c "import mypkg")');
+  assert.strictEqual(permissions.suggestRule('bash tests/run_test.sh'), 'Bash(bash tests/run_test.sh)');
+});
+
+test('permissions: without CLAUDE_PROJECT_DIR the outermost git repo is the project; a nested clone cannot approve itself', () => {
+  const permissions = require('../scripts/lib/permissions.js');
+  const d = tmp({ '.git/HEAD': 'ref: refs/heads/main\n', 'vendor/evil/.git/HEAD': 'ref: refs/heads/main\n',
+    'vendor/evil/.claude/settings.json': JSON.stringify({ permissions: { allow: ['Bash(npm test:*)'] } }) });
+  delete process.env.CLAUDE_PROJECT_DIR;
+  assert.strictEqual(permissions.projectRoot(path.join(d, 'vendor', 'evil')), d);
+  assert.strictEqual(permissions.check('npm test', { cwd: path.join(d, 'vendor', 'evil') }).ok, false);
 });

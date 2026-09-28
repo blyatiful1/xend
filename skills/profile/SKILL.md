@@ -3,7 +3,7 @@ name: profile
 description: Show or switch the xend profile (lite, balanced, aggressive).
 argument-hint: "[lite|balanced|aggressive]"
 disable-model-invocation: true
-allowed-tools: Bash(node *)
+allowed-tools: Bash(node *scripts/xend-cli.js*)
 ---
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" profile $ARGUMENTS 2>&1`
