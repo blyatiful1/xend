@@ -1,0 +1,4 @@
+{"arm":"baseline","cost_usd":0.0433482,"cache_creation":9924,"cache_read":18041,"ok":true,"ts":"2026-09-28T05:48:57.829Z"}
+{"arm":"xend-new","cost_usd":0.0457442,"cache_creation":10523,"cache_read":18041,"ok":true,"ts":"2026-09-28T05:49:04.096Z"}
+{"arm":"new-nolean","cost_usd":0.0451482,"cache_creation":10374,"cache_read":18041,"ok":true,"ts":"2026-09-28T05:49:09.477Z"}
+{"arm":"new-noterse","cost_usd":0.045236200000000004,"cache_creation":10396,"cache_read":18041,"ok":true,"ts":"2026-09-28T05:49:14.968Z"}

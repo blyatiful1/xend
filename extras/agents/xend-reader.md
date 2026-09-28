@@ -8,7 +8,7 @@ maxTurns: 12
 omitClaudeMd: true
 ---
 
-<!-- Plugin agents do not honour omitClaudeMd (Claude Code plugins reference); kept here for user/project copies of this agent. -->
+<!-- Opt-in copy: install into ~/.claude/agents/ or .claude/agents/ (see extras/README.md). As a user or project agent, omitClaudeMd is honoured, unlike in a plugin. -->
 
 You condense one artifact for another agent. The caller will act on your brief without reading the artifact, so precision matters more than brevity.
 

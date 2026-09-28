@@ -2,7 +2,7 @@
 
 **Spend fewer tokens in Claude Code without losing quality.**
 
-xend is a Claude Code plugin built from what the evidence says actually works: keep the prompt cache warm, shrink what the model *reads* (not just what it writes), reset context cheaply, route bulky work to cheaper models with verification, keep file contents out of the main model's context by planning on the main model and building with verified cheap subagents, and measure everything with a paired benchmark instead of a marketing percentage. No proxy, no daemon, no database; Node.js 18+ is the only dependency.
+xend is a Claude Code plugin built from what the evidence says actually works: keep its own footprint tiny (every token a plugin injects is paid in every session), take fewer turns (on short tasks a model call costs more than anything the model writes), shrink what the model *reads*, reset context cheaply, and measure everything with a paired benchmark instead of a marketing percentage. No proxy, no daemon, no database; Node.js 18+ is the only dependency.
 
 Where the numbers come from: `docs/RESEARCH.md` (evidence base and 18 hypotheses, each graded), `docs/ARCHITECTURE.md` (how each mechanism maps to a native Claude Code extension point), `bench/` (the quality gate).
 
@@ -37,37 +37,57 @@ Then, in a new session:
 | Layer | Mechanism | Where it lives |
 |---|---|---|
 | Measure | session stats from Claude Code's transcript (tokens, cache hit ratio, cost by model, largest tool results, re-reads); static audit of memory files, settings, MCP servers and per-turn hooks with ranked fixes | `/xend:stats`, `/xend:doctor` |
-| Say less | caveman-compatible terse style (`lite`, `full`, `ultra`) with hard exemptions: code, errors, numbers, security warnings, and anything persisted outside chat stay exact | session block, `/xend:terse` |
-| Build less | ponytail's lazy-senior-dev ladder (YAGNI, reuse what is here, stdlib, native feature, one line) injected at SessionStart; xend defers to the upstream ponytail plugin when one is installed | session block, `/xend:ponytail` |
-| Read less | deterministic, recoverable shaping of tool results: escape codes, progress bars, repeated lines, passing-test rows and install chatter removed; very long generic output cut to head and tail with the original saved and named; byte-identical command re-runs shortened; grep/glob lists capped with truthful totals | PostToolUse hook (`updatedToolOutput`) |
-| Delegate | `xend-scout` (Haiku, citations only), `xend-reader` (Haiku, condense one artifact), `xend-worker` (Sonnet), `xend-worker-lite` (Haiku, one mechanical fully-specified change), `xend-reviewer` (Sonnet), and a routing rule: accept a cheaper model's output only after verifying it | `agents/`, `/xend:route` |
-| Plan, then build cheaply | Opt-in. The main model writes a plan through a small CLI; Haiku/Sonnet builders implement each task in disposable contexts; a deterministic SubagentStop hook re-runs every builder's verify command and sends false claims back for restatement; a PreToolUse gate refuses direct edits above the file floor until a plan exists | `/xend:plan`, session block, `scripts/subagent-stop.js`, `scripts/pre-edit-gate.js` |
+| Stay small | the whole per-session footprint is ~413 cache-write tokens (a 709-byte session block and two one-line builder descriptions), down from ~1,400; utilities are user-only skills, which Claude Code does not list to the model | session block, `extras/` |
+| Say less | caveman-compatible terse style (`lite`, `full`, `ultra`); code, commands, paths, errors and numbers stay exact, and anything written to files, commits or PRs stays in normal prose | session block, `/xend:terse` |
+| Take fewer turns | after an `Edit`, run the project's quick tests (allowlisted command, bounded, off when the suite is slow) and hand the result to the model with the edit, so it does not spend a turn running them; a work rule against read-backs and searches for files the task already names | PostToolUse hook, session block |
+| Read less | deterministic, recoverable shaping of tool results: escape codes, progress bars, repeated lines, passing-test rows and install chatter removed; very long generic output cut to head and tail with the original saved and named; byte-identical command re-runs shortened; grep/glob lists capped with truthful totals; every marker explains itself | PostToolUse hook (`updatedToolOutput`) |
 | Reset cheaply | a checkpoint (edited files, verification commands, decisions) written before compaction and re-injected after `/compact` or `/clear`, so `/clear` becomes the default way to end a task | PreCompact hook, `/xend:checkpoint` |
 | Native levers | prompt-cache TTL, Bash output cap, MCP output cap, a `# Compact instructions` section, and (aggressive) Anthropic's server-side clearing of old tool results | `/xend:setup` |
+| Opt-in | lean build rules adapted from ponytail (`/xend:ponytail full`); architect mode, where the main model plans and verified Haiku/Sonnet builders implement (`/xend:plan on`); Haiku scout/reader and Sonnet reviewer agents (`extras/agents/`, copy to use) | see below |
 
-What xend never does: rewrite your prompts, rewrite memory files into telegraphic prose, alter a `Read` result, summarize tool output with a model, switch the main session's model, or lower effort globally. Each of those has evidence against it (see the rejected list in `docs/RESEARCH.md`).
+What xend never does: rewrite your prompts, rewrite memory files into telegraphic prose, alter a `Read` result, summarize tool output with a model, run a command that is not on its allowlist, switch the main session's model, or lower effort globally. Each of those has evidence against it (see the rejected list in `docs/RESEARCH.md`).
 
 ## Profiles
 
 | Profile | Adds | Use when |
 |---|---|---|
-| `lite` | terse `lite`, noise-only output cleanup, repeat shortening, audits, plus lean `lite` (xend's adapted ruleset) | you want a conservative start and your own numbers first |
-| `balanced` (default) | terse `full`, structured shaping (tests, installs, long generic output), delegation, checkpoints, plus lean `full` (xend's adapted ruleset); architect mode is opt-in (`/xend:plan on`) | everyday work |
-| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental), plus lean `full` (adapted text; set `XEND_PONYTAIL_TEXT=upstream` for the upstream-verbatim ruleset JetBrains measured, ~1,400 tokens more per session) | long sessions; validate with the bench first |
+| `lite` | terse `lite`, noise-only output cleanup, repeat shortening, audits | you want a conservative start and your own numbers first |
+| `balanced` (default) | terse `full`, structured shaping (tests, installs, long generic output), auto-test after edits, checkpoints | everyday work |
+| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental) | long sessions; validate with the bench first |
 
-Switch with `/xend:profile <name>` or a `.xend.json` in the repo. Every transform has a kill switch (`XEND_SHAPE_TESTRUNNERS=0`, `XEND_TERSE=off`, ...). Details: `docs/PROFILES.md`.
+Lean build rules and architect mode are opt-in in every profile (`/xend:ponytail full`, `/xend:plan on`): both were measured and neither paid for itself on the bench (see below). Switch profiles with `/xend:profile <name>` or a `.xend.json` in the repo. Every transform has a kill switch (`XEND_AUTOTEST=0`, `XEND_SHAPE_TESTRUNNERS=0`, `XEND_TERSE=off`, ...). Details: `docs/PROFILES.md`.
 
 ## What to expect
 
-Honest numbers beat advertised ones. Independent measurements of the techniques xend combines:
+Measured with the paired bench (Claude Sonnet 5; the 21 short tasks at low effort, the three project tasks at medium effort; each run pairs the same tasks across arms; `bench/results/r8-*` to `r11-*`, details in `docs/RESEARCH.md` section 7b):
+
+| Comparison | Paired runs | Pass rate | Output tokens | Turns | Cost per task |
+|---|---|---|---|---|---|
+| this release vs the previous one, short tasks (r10) | 42 | 92.9% -> 95.2% | -12.1% | 4.6 -> 4.2 | **-9.1%** (95% CI -12.7% to -4.7%), all three gates PASS |
+| this release vs no plugin, short tasks (r10 + r11) | 84 | 91.7% -> 96.4% | -11.6% | 4.5 -> 4.2 | -1.2% (95% CI -4.4% to +3.1%) |
+| previous release vs no plugin, short tasks (r8 + r10) | 84 | 94.0% -> 90.5% | -4.1% | 4.6 -> 4.5 | +5.8% (95% CI -1.2% to +11.4%), cost gate FAIL |
+| this release vs no plugin, project tasks (r10p) | 6 | 100% of hidden tests in both | -4.7% | 25.0 -> 22.0 | **-15.9%** (95% CI -39.6% to -2.5%), all three gates PASS |
+| this release vs the previous one, project tasks (r10p) | 6 | 100% in both | +2.7% | 21.2 -> 22.0 | -0.2% (95% CI -11.1% to +13.5%) |
+
+What changed, and what each part is worth:
+
+- **The plugin's own footprint was the first cost.** Measured through a request-logging proxy, the previous release added ~1,400 cache-write tokens to every session, and Claude Code now writes the cache at the 1-hour rate (2x the input price). This release adds ~413. On its own that took the short-task suite from +4.2% to +0.4% against no plugin (r8).
+- **The turn is the unit of cost on short tasks.** After an `Edit`, xend runs the project's quick tests and hands the result over with the edit, so the model does not spend a turn running them. Measured alone on the same build: **-5.5% cost (95% CI -9.7% to -2.0%), turns -0.5, pass rate unchanged, all three gates PASS** (r8). Bugfix tasks went from four turns to three. Asking the model to batch the edit and the test itself did not work (Sonnet kept them in separate turns in every traced run), so a hook does it.
+- **Lean rules are opt-in now.** xend's adapted ponytail text bought no measurable saving and made the model leave a required value blank on one adversarial task (lean on passed 3 of 6, lean off 3 of 3), which by this project's own pre-registered rule turns a feature off.
+
+So on short tasks this release is cost-neutral against no plugin, with a higher pass rate and fewer output tokens; the confident saving there is against the previous release. On long tasks (a 50-module brownfield change and two greenfield packages) both releases cost about 16% less than no plugin at 100% of hidden tests, and they cannot be told apart. The levers the bench cannot see (cache TTL across pauses, MCP output caps, compaction avoidance through checkpoints and `/clear`) come on top through `/xend:setup` and `/xend:doctor`.
+
+Independent measurements of the techniques xend combines:
 
 - Terse output style: 8.5% fewer output tokens on 86 real coding tasks, no detectable quality change (JetBrains, paired A/B). Output is a minority of agentic spend, so expect a few percent of total cost from this layer alone; much more in chat-style Q&A.
 - Command-rewriting filters (rtk): **+7.6% cost** and more turns in the same harness. This is the failure mode xend's marker contract and recoverability rules are designed against.
 - Masking old tool results: 52% cheaper with a slightly higher solve rate on SWE-bench Verified (JetBrains Research). xend enables Anthropic's server-side version in the `aggressive` profile.
-- Prompt caching: the fixed prefix measured here was 32,062 tokens per request; cache reads cost a tenth of a miss. Nothing xend injects varies between turns.
-- The ponytail ruleset: **-10.3% cost (p = 0.004)**, -15.4% code (p = 0.088, against an advertised -54%), -11% time, and no significant quality difference across 80 paired tasks (JetBrains; 251 trials, $246.09). The load-bearing finding is about *delivery*, not content: "If you copy the SKILL.md into a skills folder and let the model decide when to use it, it will self-activate zero times." That is why xend injects it from the SessionStart hook. **Two honest caveats:** only the cost figure is statistically solid — the code figure is not — and the text xend injects by default on `lite` and `balanced` is xend's own 240-token condensation, **not** the ~1,382-token artifact those numbers describe; this text is xend's adaptation and is untested. Set `XEND_PONYTAIL_TEXT=upstream` (the default on `aggressive`) to run the measured text — that text is upstream-verbatim (the measured artifact).
+- Prompt caching: cache reads cost a tenth of the input price, and Claude Code writes the cache at the 1-hour rate (2x). Nothing xend injects varies between turns, so its ~413 tokens are written once per session and then read at a tenth.
+- The ponytail ruleset: **-10.3% cost (p = 0.004)**, -15.4% code (p = 0.088, against an advertised -54%), -11% time, and no significant quality difference across 80 paired tasks (JetBrains; 251 trials, $246.09), measured with the ~1,382-token upstream text injected at SessionStart on longer tasks. xend's own runs never reproduced a saving on short tasks with either text (r4, r5, r8), so lean rules are opt-in: `/xend:ponytail full` for xend's short adapted text, `XEND_PONYTAIL_TEXT=upstream` for the measured one.
 
-xend's own paired runs (Claude Sonnet 5 at low effort, same tasks under both arms; `bench/results/`):
+### Earlier runs
+
+Before r8 the bench ran with the hosting session's tool set and without a warm-up, so the percentages below are relative to a heavier base than a local session has (`docs/RESEARCH.md` H25); they remain valid as paired comparisons of the builds of the time (Claude Sonnet 5, low effort):
 
 | Run | Tasks x trials | Pass rate (baseline -> xend) | Output tokens | Turns | Cost per task |
 |---|---|---|---|---|---|
@@ -78,11 +98,7 @@ xend's own paired runs (Claude Sonnet 5 at low effort, same tasks under both arm
 | r4, ponytail on (xend's adapted text, the shipped `balanced` default) | 21 x 1 | 90.5% -> 90.5% (same two tasks fail in both arms) | -4.9% | 4.3 -> 4.5 | +3.9% (95% CI -4.5% to +10.0%) |
 | r5, ponytail on (upstream-verbatim text, opt-in) | 21 x 1 | 95.2% -> 90.5% (the flaky adversarial task again) | **+8.6%** | 4.5 -> 5.0 | **+16.7%** (95% CI +10.6% to +24.0%) |
 
-On these micro-tasks ponytail does not reproduce the JetBrains saving: the tasks write too little code for a "write less code" rule to remove any, so only the rule's prefix shows up. The adapted text (about 215 tokens) is within noise of no ponytail at all (r3 vs r4); the upstream-verbatim text (about 1,400 tokens) costs 17% more and makes the model write longer replies and take more turns. The JetBrains result came from larger SkillsBench tasks. Hence the shipped default is the adapted text in every profile, and the upstream text is opt-in for people who want the measured artifact on long, code-heavy work.
-
-Read r2 carefully, because it is the kind of number this project exists to surface. Quality was never worse on any task and improved on two. But these tasks average 4.5 turns, the plugin's fixed prefix (session block plus skill and agent descriptions) is cache-written once per session and not amortized over so few turns, and the shaping layer had something to condense on one task out of 21. The gate therefore returns **FAIL on cost** for micro-tasks, exactly as rtk's independent benchmark did for rtk. Where xend does win is longer and reading-heavier work: in r1 the log-analysis task went from 8 turns and 455k tokens to 4 turns and 206k, and the navigation task in r2 used 23% fewer tokens with one turn less. After r2 the prefix was cut by roughly 40%; r3 shows the overhead more than halved (+3.5%, interval including zero) with output tokens down 8.6% and turns down. The levers the bench cannot see at all (cache TTL across pauses, MCP output caps, compaction avoidance through checkpoints and `/clear`, deferred tool schemas) are applied through `/xend:setup` and `/xend:doctor`.
-
-The practical guidance that follows from the data: install xend for sessions that read a lot or run long, use `/xend:doctor` and `/xend:setup` for the native levers, and do not expect savings on five-turn micro-tasks. A 21-task suite cannot certify a 3-point quality bound (it detects roughly an 8-point drop); the bench reports its minimum detectable effect and merges evidence across runs. See `bench/README.md`.
+These runs are why this release exists: on five-turn tasks the plugin's fixed prefix cost more than terse output saved, and the ponytail texts did not reproduce the JetBrains saving on tasks that write little code.
 
 ### Architect mode on long tasks
 
@@ -112,7 +128,8 @@ Every mechanism follows the same rules, and the benchmark exists to catch violat
 4. `Read` results are never altered. Grep and Glob caps keep the true counts.
 5. Nothing shapes inside subagents.
 6. Promotion of a profile requires the bench to pass three gates at once: pass-rate delta not worse than -3 points, cost confidently lower, turns not higher.
-7. A subagent's claim is never trusted unverified: when its `Verification: <command> -> ...` line matches the allowlist, xend re-runs the command itself; every citation it makes is checked against the real files; a mismatch or a bad citation is sent back to the subagent for restatement; a command outside the allowlist is recorded as unverifiable, never run and never trusted as a PASS.
+7. The auto-test runs only allowlisted test commands (the same allowlist the verifier uses) and never one that a Claude Code permission rule of yours denies or asks about (`Bash`, `Bash(npm test:*)`, ...): a hook runs without a permission prompt, so your rules decide. It never runs inside subagents or after `Write`, has a 20-second timeout, and a suite slower than 8 seconds switches it off for the session, and a suite that cannot be collected yet produces no note at all. Its note names the command it ran, so a pass is never mistaken for the task's own test.
+8. A subagent's claim is never trusted unverified: when its `Verification: <command> -> ...` line matches the allowlist, xend re-runs the command itself; every citation it makes is checked against the real files; a mismatch or a bad citation is sent back to the subagent for restatement; a command outside the allowlist is recorded as unverifiable, never run and never trusted as a PASS.
 
 ## Benchmark
 
@@ -120,6 +137,13 @@ Every mechanism follows the same rules, and the benchmark exists to catch violat
 bash bench/selftest.sh                                  # every task fails before its fix and passes after
 node bench/run.js --runs 3 --model sonnet --effort low  # paired baseline vs xend
 node bench/analyze.js                                   # merged report with CIs, sign test, MDE, verdict
+```
+
+Every child runs as a plain local `claude -p` with an explicit local tool set (`--toolset local`, the default), and each arm first makes one warm-up request so no arm pays the shared cache write by running first. Arms can load the plugin from any checkout (`label:xend@/path/to/checkout:sonnet`, or `--arms-file` with per-arm environment), which is how the previous release and this one run side by side in one paired pass:
+
+```bash
+git worktree add ../xend-main origin/main
+node bench/run.js --arms "baseline,xend-main:xend@../xend-main:sonnet,xend-new:xend:sonnet" --runs 2 -j 4
 ```
 
 21 tasks: bugfix, feature, refactor, reading-heavy, navigation, Q&A, plus five adversarial tasks designed to catch condensers that hide the middle of an output, a diff hunk, a debug print, grep hits past a cap, or that minify a file the model must edit. Two more, `project-*`, are bigger multi-file tasks with hidden tests and partial credit (`test.sh` prints `SCORE: p/t` instead of a flat pass/fail) — where "one model does everything" is compared against architect mode with a multi-arm run, e.g.:

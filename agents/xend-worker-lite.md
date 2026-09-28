@@ -1,6 +1,6 @@
 ---
 name: xend-worker-lite
-description: Applies one fully specified, mechanical change (an exact diff, or a named function with pinned behaviour and a test to satisfy) in one to three files. Not for anything needing a decision.
+description: Architect-mode builder (Haiku). Only for briefs from xend plan next.
 model: haiku
 effort: low
 tools: Read, Edit, Write, MultiEdit, Grep, Glob, Bash

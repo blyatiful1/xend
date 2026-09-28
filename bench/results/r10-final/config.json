@@ -1,0 +1,77 @@
+{
+  "opts": {
+    "arms": [
+      "baseline",
+      "xend"
+    ],
+    "runs": 2,
+    "model": "sonnet",
+    "effort": "low",
+    "tasks": "adv-diff-review-300,adv-grep-many-hits,adv-json-edit-after-read,adv-middle-of-output,adv-print-debugging,bugfix-date-range,bugfix-mutable-default,bugfix-pagination-offset,bugfix-retry-swallowed,feature-cli-json,feature-input-validation,feature-lru-cache,navigation-find-constant,navigation-rename-function,qa-parse-record-impact,qa-retry-config,reading-big-file-edit,reading-config-drift,reading-log-needle,reading-test-triage,refactor-dedupe-helper",
+    "category": "",
+    "concurrency": 4,
+    "maxBudget": 2,
+    "tools": "",
+    "toolset": "local",
+    "warmup": true,
+    "armsFile": "/tmp/claude-0/-home-user-xend/d3bf5ebb-ed2b-5044-917b-5c25577a76f9/scratchpad/arms-r10.json",
+    "profile": "balanced",
+    "ponytail": "",
+    "ponytailText": "",
+    "ponytailStrict": false,
+    "armEnv": "",
+    "out": "bench/results/r10-final",
+    "keep": false,
+    "dryRun": false,
+    "list": false,
+    "extra": [],
+    "arm_env": {}
+  },
+  "arms": [
+    {
+      "label": "baseline",
+      "kind": "baseline",
+      "model": "sonnet",
+      "mode": "plain"
+    },
+    {
+      "label": "xend-main",
+      "kind": "xend",
+      "model": "sonnet",
+      "mode": "plain",
+      "pluginDir": "/tmp/claude-0/-home-user-xend/d3bf5ebb-ed2b-5044-917b-5c25577a76f9/scratchpad/xend-main"
+    },
+    {
+      "label": "xend-final",
+      "kind": "xend",
+      "model": "sonnet",
+      "mode": "plain",
+      "pluginDir": "/tmp/claude-0/-home-user-xend/d3bf5ebb-ed2b-5044-917b-5c25577a76f9/scratchpad/xend-final"
+    }
+  ],
+  "tasks": [
+    "adv-diff-review-300",
+    "adv-grep-many-hits",
+    "adv-json-edit-after-read",
+    "adv-middle-of-output",
+    "adv-print-debugging",
+    "bugfix-date-range",
+    "bugfix-mutable-default",
+    "bugfix-pagination-offset",
+    "bugfix-retry-swallowed",
+    "feature-cli-json",
+    "feature-input-validation",
+    "feature-lru-cache",
+    "navigation-find-constant",
+    "navigation-rename-function",
+    "qa-parse-record-impact",
+    "qa-retry-config",
+    "reading-big-file-edit",
+    "reading-config-drift",
+    "reading-log-needle",
+    "reading-test-triage",
+    "refactor-dedupe-helper"
+  ],
+  "claude_version": "2.1.283 (Claude Code)",
+  "started": "2026-09-28T05:52:51.002Z"
+}

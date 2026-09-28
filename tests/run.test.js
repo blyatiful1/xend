@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { parseArm, parseScore, splitCost, parseArmEnv } = require('../bench/run.js');
+const { parseArm, normalizeArm, toolArgs, parseScore, splitCost, parseArmEnv, TOOLSETS } = require('../bench/run.js');
 
 test('parseArm: legacy bare label uses the label as kind and the default model, mode plain', () => {
   assert.deepStrictEqual(parseArm('baseline', { model: 'sonnet' }), { label: 'baseline', kind: 'baseline', model: 'sonnet', mode: 'plain' });
@@ -83,4 +83,28 @@ test('parseArmEnv: empty or undefined input yields {}', () => {
 test('parseArmEnv: splits pairs on "," and each pair on its first "=" (a value may itself contain "=")', () => {
   assert.deepStrictEqual(parseArmEnv('A=1,B=x=y'), { A: '1', B: 'x=y' });
   assert.deepStrictEqual(parseArmEnv('XEND_ARCHITECT_MIN_FILES=1'), { XEND_ARCHITECT_MIN_FILES: '1' });
+});
+
+test('parseArm: xend@<dir> loads the plugin from another checkout; baseline ignores a dir', () => {
+  assert.deepStrictEqual(parseArm('old:xend@/tmp/xend-main:sonnet', {}), { label: 'old', kind: 'xend', model: 'sonnet', mode: 'plain', pluginDir: '/tmp/xend-main' });
+  assert.deepStrictEqual(parseArm('b:baseline@/x:sonnet', {}), { label: 'b', kind: 'baseline', model: 'sonnet', mode: 'plain' });
+});
+
+test('normalizeArm: arms-file entries keep per-arm env and plugin dir, unknown kinds fall back to baseline', () => {
+  assert.deepStrictEqual(normalizeArm({ label: 'noterse', kind: 'xend', env: { XEND_TERSE: 'off' } }, { model: 'sonnet' }),
+    { label: 'noterse', kind: 'xend', model: 'sonnet', mode: 'plain', env: { XEND_TERSE: 'off' } });
+  assert.deepStrictEqual(normalizeArm({ label: 'x', kind: 'weird', pluginDir: '/p', env: { A: '1' } }, { model: 'haiku' }),
+    { label: 'x', kind: 'baseline', model: 'haiku', mode: 'plain', env: { A: '1' } });
+});
+
+test('toolArgs: local toolset makes the available set explicit and pre-approves it plus the task tools', () => {
+  const r = toolArgs('Bash,Read,Edit,Write,MultiEdit,Grep,Glob', 'local');
+  assert.strictEqual(r.tools, TOOLSETS.local);
+  for (const t of TOOLSETS.local.split(',')) assert.ok(r.allowedTools.split(',').includes(t), t);
+  assert.ok(r.allowedTools.split(',').includes('MultiEdit'));
+  assert.ok(!r.tools.split(',').includes('MultiEdit'), 'MultiEdit is not a built-in tool name for --tools');
+});
+
+test('toolArgs: host toolset keeps the legacy behaviour (no --tools, only task tools approved)', () => {
+  assert.deepStrictEqual(toolArgs('Bash,Read', 'host'), { tools: null, allowedTools: 'Bash,Read' });
 });

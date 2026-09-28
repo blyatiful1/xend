@@ -1,6 +1,6 @@
 ---
 name: xend-worker
-description: Implements a fully specified, testable change large enough to justify a fresh context; returns a diff summary and test results. Not for ambiguous, cross-cutting, or small work.
+description: Architect-mode builder (Sonnet). Only for briefs from xend plan next.
 model: sonnet
 effort: medium
 tools: Read, Edit, Write, MultiEdit, Grep, Glob, Bash

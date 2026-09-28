@@ -12,7 +12,7 @@ const PROFILES = {
   lite: {
     profile: 'lite',
     terse: 'lite',
-    ponytail: 'lite',        // lean build rules; 'adapted' text is xend's own condensation and is untested
+    ponytail: 'off',         // lean build rules, opt-in: bench r8 found the adapted text no cheaper and behind a pass-rate drop (docs/RESEARCH.md H19)
     ponytailText: 'adapted',
     upstream: { ponytail: 'auto' },
     ponytailStrict: false,
@@ -38,13 +38,15 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
+    // run the project's quick tests after an Edit and attach the result (saves the test turn); off in lite
+    autoTest: { enabled: false, command: '', maxMs: 8000, timeoutMs: 20000, maxChars: 1200 },
     // plan-then-build: opt-in (XEND_ARCHITECT=1, .xend.json {"architect":{"enabled":true}}, or /xend:plan on); bench r6/r7 measured +125% to +250% cost on greenfield project tasks
     architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
   balanced: {
     profile: 'balanced',
     terse: 'full',
-    ponytail: 'full',        // lean build rules; 'adapted' text is xend's own condensation and is untested
+    ponytail: 'off',         // lean build rules, opt-in: bench r8 found the adapted text no cheaper and behind a pass-rate drop (docs/RESEARCH.md H19)
     ponytailText: 'adapted',
     upstream: { ponytail: 'auto' },
     ponytailStrict: false,
@@ -70,13 +72,14 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
+    autoTest: { enabled: true, command: '', maxMs: 8000, timeoutMs: 20000, maxChars: 1200 },
     // plan-then-build: opt-in (XEND_ARCHITECT=1, .xend.json {"architect":{"enabled":true}}, or /xend:plan on); bench r6/r7 measured +125% to +250% cost on greenfield project tasks
     architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
   aggressive: {
     profile: 'aggressive',
     terse: 'full',
-    ponytail: 'full',        // lean build rules; 'adapted' text is xend's own condensation and is untested
+    ponytail: 'off',         // lean build rules, opt-in: bench r8 found the adapted text no cheaper and behind a pass-rate drop (docs/RESEARCH.md H19)
     ponytailText: 'adapted',      // upstream-verbatim text is opt-in (XEND_PONYTAIL_TEXT=upstream): bench r5 measured +16.7% cost on micro-tasks
     upstream: { ponytail: 'auto' },
     ponytailStrict: false,
@@ -102,6 +105,7 @@ const PROFILES = {
     delegation: true,
     checkpoint: true,
     readingDiscipline: true,
+    autoTest: { enabled: true, command: '', maxMs: 8000, timeoutMs: 20000, maxChars: 1200 },
     // plan-then-build: opt-in (XEND_ARCHITECT=1, .xend.json {"architect":{"enabled":true}}, or /xend:plan on); bench r6/r7 measured +125% to +250% cost on greenfield project tasks
     architect: { enabled: false, gate: true, minFiles: 4, gateMaxDenials: 3, minToolCalls: 8, verify: true, verifyTimeoutMs: 120000, blockOnMismatch: true, defaultTier: 'lite' },
   },
@@ -171,6 +175,8 @@ function envOverrides(env) {
   if (env.XEND_PONYTAIL_TEXT && PONYTAIL_TEXTS.includes(env.XEND_PONYTAIL_TEXT)) o.ponytailText = env.XEND_PONYTAIL_TEXT;
   if (env.XEND_UPSTREAM_PONYTAIL && UPSTREAM_MODES.includes(env.XEND_UPSTREAM_PONYTAIL)) o.upstream = { ponytail: env.XEND_UPSTREAM_PONYTAIL };
   if (env.XEND_PONYTAIL_STRICT !== undefined) o.ponytailStrict = !/^(0|false|off)$/i.test(env.XEND_PONYTAIL_STRICT);
+  if (env.XEND_AUTOTEST !== undefined) o.autoTest = Object.assign({}, o.autoTest, { enabled: !/^(0|false|off)$/i.test(env.XEND_AUTOTEST) });
+  if (env.XEND_AUTOTEST_CMD) o.autoTest = Object.assign({}, o.autoTest, { command: env.XEND_AUTOTEST_CMD });
   if (env.XEND_CHECKPOINT !== undefined) o.checkpoint = !/^(0|false|off)$/i.test(env.XEND_CHECKPOINT);
   if (env.XEND_ARCHITECT !== undefined) o.architect = Object.assign({}, o.architect, { enabled: !/^(0|false|off)$/i.test(env.XEND_ARCHITECT) });
   if (env.XEND_ARCHITECT_GATE !== undefined) o.architect = Object.assign({}, o.architect, { gate: !/^(0|false|off)$/i.test(env.XEND_ARCHITECT_GATE) });

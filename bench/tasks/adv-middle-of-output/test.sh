@@ -12,7 +12,12 @@ except FileNotFoundError:
 
 m = re.search(r'(?m)^\s*ARTIFACT_CACHE_TOKEN\s*=\s*\S+', content)
 if not m:
-    print("FAIL: ARTIFACT_CACHE_TOKEN was not added to config/env.example (per build/build.log)")
+    # Same verdict either way; the message says which, because an empty value means the model did
+    # find the decisive log line (the point of this adversarial task) and only left the value blank.
+    if re.search(r'(?m)^\s*ARTIFACT_CACHE_TOKEN\s*=\s*$', content):
+        print("FAIL: ARTIFACT_CACHE_TOKEN was added to config/env.example with an empty value (the log line was found; a value is required)")
+    else:
+        print("FAIL: ARTIFACT_CACHE_TOKEN was not added to config/env.example (per build/build.log)")
     sys.exit(1)
 
 # The other pre-existing variables must be left untouched.

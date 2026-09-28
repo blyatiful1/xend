@@ -75,67 +75,65 @@ test('context block is stable and contains no timestamps', () => {
   const b = context.build(cfg, {});
   assert.strictEqual(a, b);
   assert.ok(!/\d{4}-\d{2}-\d{2}/.test(a));
-  assert.ok(a.includes('[xend]'));
 
-  // Prefix regression guard: with no opts.ponytail the block is byte-identical to the
-  // pre-integration composition, so every existing caller and test is unaffected. The default
-  // (balanced) profile now has architect off (opt-in after bench r6/r7), so no paragraph or
-  // header suffix is expected here; a second assertion below checks the block with it enabled.
+  // Prefix regression guard: with no opts.ponytail the block is exactly header + terse (with its
+  // exemptions) + the work rule. The condensed-output contract lives in each [xend] marker, and
+  // there is no delegation paragraph: a session pays for neither unless it uses them.
   const archOn = cfg.architect && cfg.architect.enabled;
   assert.strictEqual(archOn, false, 'balanced default: architect is opt-in');
-  const preIntegrationParts = [
-    'xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + (archOn ? ', architect' : '') + ').',
-    context.TERSE[cfg.terse], context.TERSE_EXEMPTIONS, context.READING, context.CONDENSED, context.DELEGATION,
+  const baseParts = [
+    'xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + ').',
+    context.TERSE[cfg.terse] + ' ' + context.TERSE_EXEMPTIONS, context.READING,
   ];
-  if (archOn) preIntegrationParts.push(context.architectText(undefined, cfg.architect.gate !== false));
-  const preIntegration = preIntegrationParts.join('\n\n');
-  assert.strictEqual(a, preIntegration, 'ponytail integration changed the base block');
+  const base = baseParts.join('\n\n');
+  assert.strictEqual(a, base, 'base block changed');
+  assert.ok(!a.includes('[xend]'), 'the marker explains itself; the block must not');
   const offOpts = { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: 'adapted', strict: false } };
-  assert.strictEqual(context.build(Object.assign({}, cfg, { ponytail: 'off' }), offOpts), preIntegration);
+  assert.strictEqual(context.build(Object.assign({}, cfg, { ponytail: 'off' }), offOpts), base);
 
   // Same guard with architect explicitly enabled: the paragraph and header suffix appear.
   const cfgArchOn = Object.assign({}, cfg, { architect: Object.assign({}, cfg.architect, { enabled: true }) });
   const aOn = context.build(cfgArchOn, {});
-  const preIntegrationOnParts = [
+  const onParts = [
     'xend active (profile ' + cfgArchOn.profile + ', terse ' + cfgArchOn.terse + ', architect' + ').',
-    context.TERSE[cfgArchOn.terse], context.TERSE_EXEMPTIONS, context.READING, context.CONDENSED, context.DELEGATION,
+    context.TERSE[cfgArchOn.terse] + ' ' + context.TERSE_EXEMPTIONS, context.READING,
     context.architectText(undefined, cfgArchOn.architect.gate !== false),
   ];
-  assert.strictEqual(aOn, preIntegrationOnParts.join('\n\n'), 'architect-enabled block regressed');
+  assert.strictEqual(aOn, onParts.join('\n\n'), 'architect-enabled block regressed');
 
-  // Three variant-aware ceilings. One number for all three would stop guarding anything:
-  // the upstream-verbatim text is ~2.7x the adapted one and would swallow any regression.
-  // architect is held disabled here: these ceilings guard the ponytail/lean composition, not
-  // the (separately tested) architect paragraph.
+  // Variant-aware ceilings (characters; ~4 per token). The whole shipped block used to be 2,869
+  // characters; bench r8 priced that at several percent of a short task, so these stay tight.
   const lean = (over) => context.build(Object.assign({}, cfg, { architect: { enabled: false } }, over), { ponytail: { owns: true, upstreamOwns: false, injecting: false, mode: 'full', text: over.ponytailText || 'adapted', strict: false } });
   const blockOff = lean({ ponytail: 'off' });
   const blockAdapted = lean({ ponytail: 'full', ponytailText: 'adapted' });
   const blockUpstream = lean({ ponytail: 'full', ponytailText: 'upstream' });
-  assert.ok(blockOff.length < 1800, 'ponytail off: ' + blockOff.length);
-  assert.ok(blockAdapted.length < 2800, 'adapted lean rules: ' + blockAdapted.length);
+  assert.ok(blockOff.length < 850, 'ponytail off: ' + blockOff.length);
+  assert.ok(blockAdapted.length < 1250, 'adapted lean rules: ' + blockAdapted.length);
   assert.ok(blockUpstream.length < 7200, 'upstream-verbatim lean rules: ' + blockUpstream.length);
   const off = context.build(Object.assign({}, cfg, { terse: 'off', delegation: false, shape: { enabled: false }, readingDiscipline: false }), {});
-  assert.ok(!off.includes('Output style'));
-  assert.ok(!off.includes('Subagents'));
+  assert.ok(!off.includes('Replies:'));
+  assert.ok(!off.includes('Work in few'));
 });
 
 test('ponytail profile defaults, env overrides and clamps', () => {
+  // Lean rules are opt-in in every profile since bench r8 (docs/RESEARCH.md H19).
   const base = config.resolve({ env: {}, cwd: os.tmpdir() });
-  assert.strictEqual(base.ponytail, 'full');
+  assert.strictEqual(base.ponytail, 'off');
   assert.strictEqual(base.ponytailText, 'adapted');
   assert.strictEqual(base.upstream.ponytail, 'auto');
   assert.strictEqual(base.ponytailStrict, false);
 
   const lite = config.resolve({ env: { XEND_PROFILE: 'lite' }, cwd: os.tmpdir() });
-  assert.strictEqual(lite.ponytail, 'lite');
+  assert.strictEqual(lite.ponytail, 'off');
   assert.strictEqual(lite.ponytailText, 'adapted');
 
   const agg = config.resolve({ env: { XEND_PROFILE: 'aggressive' }, cwd: os.tmpdir() });
-  assert.strictEqual(agg.ponytail, 'full');
+  assert.strictEqual(agg.ponytail, 'off');
   assert.strictEqual(agg.ponytailText, 'adapted');
 
   assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'ultra' }, cwd: os.tmpdir() }).ponytail, 'ultra');
-  assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'bogus' }, cwd: os.tmpdir() }).ponytail, 'full');
+  assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'bogus' }, cwd: os.tmpdir() }).ponytail, 'off');
+  assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'full' }, cwd: os.tmpdir() }).ponytail, 'full');
   assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL_TEXT: 'bogus' }, cwd: os.tmpdir() }).ponytailText, 'adapted');
   assert.strictEqual(config.resolve({ env: { XEND_UPSTREAM_PONYTAIL: 'ignore' }, cwd: os.tmpdir() }).upstream.ponytail, 'ignore');
   assert.strictEqual(config.resolve({ env: { XEND_UPSTREAM_PONYTAIL: 'bogus' }, cwd: os.tmpdir() }).upstream.ponytail, 'auto');
@@ -143,8 +141,8 @@ test('ponytail profile defaults, env overrides and clamps', () => {
   assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL_STRICT: 'off' }, cwd: os.tmpdir() }).ponytailStrict, false);
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-pony-cfg-'));
-  fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({ ponytail: 'off' }));
-  assert.strictEqual(config.resolve({ env: {}, cwd: dir }).ponytail, 'off');
+  fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({ ponytail: 'full' }));
+  assert.strictEqual(config.resolve({ env: {}, cwd: dir }).ponytail, 'full');
   assert.deepStrictEqual(config.PONYTAIL_LEVELS, ponytail.PONYTAIL_LEVELS);
 });
 
