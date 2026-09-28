@@ -29,7 +29,24 @@ node bench/analyze.js                        # merges every bench/results/*/runs
 node bench/analyze.js bench/results/<run> --md report.md
 ```
 
-`run.js` options: `--arms baseline,xend`, `--runs k`, `--model`, `--effort`, `--tasks a,b` or glob, `--category`, `--concurrency`, `--max-budget-usd` (per run, default; a task's `budget_usd` overrides it), `--tools <comma list>` (default `Bash,Read,Edit,Write,MultiEdit,Grep,Glob`; a task's `tools` overrides the default, `--tools` overrides both), `--profile lite|balanced|aggressive` (xend arms), `--keep` (keep work dirs), `--extra "<flag>"` (passed to every arm).
+`run.js` options: `--arms baseline,xend`, `--arms-file arms.json`, `--toolset local|host`, `--no-warmup`, `--runs k`, `--model`, `--effort`, `--tasks a,b` or glob, `--category`, `--concurrency`, `--max-budget-usd` (per run, default; a task's `budget_usd` overrides it), `--tools <comma list>` (default `Bash,Read,Edit,Write,MultiEdit,Grep,Glob`; a task's `tools` overrides the default, `--tools` overrides both), `--profile lite|balanced|aggressive` (xend arms), `--keep` (keep work dirs), `--extra "<flag>"` (passed to every arm).
+
+### Environment
+
+Each child is a plain local `claude -p`: the runner removes the hosting session's variables
+(`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_ENTRYPOINT`, ...). `CLAUDE_CODE_ENTRYPOINT`
+matters most: a child that inherits a cloud session's entrypoint gets that host's tool set, system
+prompt and a side request per run, in both arms. `--toolset local` (the default) passes an explicit
+`--tools` list shaped like a local session (`Agent, Bash, Edit, Glob, Grep, NotebookEdit, Read,
+Skill, WebFetch, WebSearch, Write`, plus the task's own tools) and pre-approves all of it;
+`--allowedTools` alone only pre-approves and does not stop host tools from being listed.
+`--toolset host` restores the pre-r8 behaviour.
+
+Before the timed jobs, one warm-up request per arm (run one at a time, through one Bash call) writes
+the shared system and tool prefix to the prompt cache; `warmup.jsonl` records each arm's cache
+write, and the difference between an xend arm and the baseline is exactly what the plugin adds per
+session. Without the warm-up, whichever arm ran first paid the shared write (15k against 3.4k tokens
+in one observed pair). `--no-warmup` skips it.
 
 ### Arms
 
@@ -39,6 +56,18 @@ An arm is either the legacy bare label (`baseline`, `xend` — kind = label, mod
 - `kind` — `baseline` (no plugin) or `xend` (adds `--plugin-dir <repo root>` and `XEND_PROFILE`).
 - `model` — the `--model` value for that arm (`haiku`, `sonnet`, `opus`, `fable`, or a full id), overriding the global `--model` for that arm only.
 - `mode` (xend only, optional) — `architect` runs that arm with `XEND_ARCHITECT=1` (the main model plans, cheap subagents build); `plain` (default) runs with `XEND_ARCHITECT=0`.
+
+`kind` may carry a plugin directory, `xend@<dir>`, to load xend from another checkout: that is how
+the previous release and the working tree run in the same paired pass (`git worktree add ../xend-main
+origin/main`, then `--arms "baseline,old:xend@../xend-main:sonnet,new:xend:sonnet"`). For per-arm
+environment (ablations such as auto-test off) use `--arms-file`, a JSON array of `{label, kind, model,
+mode, pluginDir, env}`:
+
+```json
+[{"label": "baseline", "kind": "baseline"},
+ {"label": "new", "kind": "xend"},
+ {"label": "new-noat", "kind": "xend", "env": {"XEND_AUTOTEST": "0"}}]
+```
 
 Any number of arms can run in one pass, e.g. to compare "one model does everything" against "xend architect mode" across several models:
 

@@ -697,10 +697,12 @@ function checkPonytail(cwd) {
   const checked = pt.evidence.filter((e) => e.startsWith('no ')).map((e) => e.slice(3));
   findings.push(finding(
     'small', 'plugins',
-    `Lean rules: level ${cfg.ponytail}, text ${label}; session block ${fmtInt(bytes)} B (~${fmtInt(estTokens(bytes))} tok)`,
+    (cfg.ponytail === 'off' ? 'Lean rules: off (opt-in)' : `Lean rules: level ${cfg.ponytail}, text ${label}`) + `; session block ${fmtInt(bytes)} B (~${fmtInt(estTokens(bytes))} tok)`,
     (pt.installed ? `upstream found via ${pt.channel} (injecting=${pt.injecting}, mode=${pt.mode})` : 'no evidence of an upstream ponytail install found in: ' + checked.join(', ')) +
       `; owner=${own.upstreamOwns ? 'ponytail plugin' : 'xend'}`,
-    'The "adapted" text is xend\'s own ~240-token condensation and is untested; the JetBrains numbers describe the ~1,382-token upstream-verbatim text (XEND_PONYTAIL_TEXT=upstream, the default on the aggressive profile).',
+    cfg.ponytail === 'off'
+      ? 'Lean rules are opt-in in every profile since bench r8: xend\'s adapted text measured no saving on short tasks and made one adversarial task fail more often. Turn them on with /xend:ponytail full or XEND_PONYTAIL=full; the ~1,382-token upstream-verbatim text JetBrains measured on long tasks is XEND_PONYTAIL_TEXT=upstream.'
+      : 'The "adapted" text is xend\'s own short condensation; bench r8 measured no saving from it on short tasks. The JetBrains numbers describe the ~1,382-token upstream-verbatim text (XEND_PONYTAIL_TEXT=upstream, opt-in).',
     'n/a',
     { level: cfg.ponytail, text: cfg.ponytailText, bytes, tokens: estTokens(bytes), owner: own.upstreamOwns ? 'upstream' : 'xend', evidence: pt.evidence }
   ));

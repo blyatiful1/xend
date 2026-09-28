@@ -2,7 +2,7 @@
 
 **Spend fewer tokens in Claude Code without losing quality.**
 
-xend is a Claude Code plugin built from what the evidence says actually works: keep the prompt cache warm, shrink what the model *reads* (not just what it writes), reset context cheaply, route bulky work to cheaper models with verification, keep file contents out of the main model's context by planning on the main model and building with verified cheap subagents, and measure everything with a paired benchmark instead of a marketing percentage. No proxy, no daemon, no database; Node.js 18+ is the only dependency.
+xend is a Claude Code plugin built from what the evidence says actually works: keep its own footprint tiny (every token a plugin injects is paid in every session), take fewer turns (on short tasks a model call costs more than anything the model writes), shrink what the model *reads*, reset context cheaply, and measure everything with a paired benchmark instead of a marketing percentage. No proxy, no daemon, no database; Node.js 18+ is the only dependency.
 
 Where the numbers come from: `docs/RESEARCH.md` (evidence base and 18 hypotheses, each graded), `docs/ARCHITECTURE.md` (how each mechanism maps to a native Claude Code extension point), `bench/` (the quality gate).
 
@@ -37,25 +37,25 @@ Then, in a new session:
 | Layer | Mechanism | Where it lives |
 |---|---|---|
 | Measure | session stats from Claude Code's transcript (tokens, cache hit ratio, cost by model, largest tool results, re-reads); static audit of memory files, settings, MCP servers and per-turn hooks with ranked fixes | `/xend:stats`, `/xend:doctor` |
-| Say less | caveman-compatible terse style (`lite`, `full`, `ultra`) with hard exemptions: code, errors, numbers, security warnings, and anything persisted outside chat stay exact | session block, `/xend:terse` |
-| Build less | ponytail's lazy-senior-dev ladder (YAGNI, reuse what is here, stdlib, native feature, one line) injected at SessionStart; xend defers to the upstream ponytail plugin when one is installed | session block, `/xend:ponytail` |
-| Read less | deterministic, recoverable shaping of tool results: escape codes, progress bars, repeated lines, passing-test rows and install chatter removed; very long generic output cut to head and tail with the original saved and named; byte-identical command re-runs shortened; grep/glob lists capped with truthful totals | PostToolUse hook (`updatedToolOutput`) |
-| Delegate | `xend-scout` (Haiku, citations only), `xend-reader` (Haiku, condense one artifact), `xend-worker` (Sonnet), `xend-worker-lite` (Haiku, one mechanical fully-specified change), `xend-reviewer` (Sonnet), and a routing rule: accept a cheaper model's output only after verifying it | `agents/`, `/xend:route` |
-| Plan, then build cheaply | Opt-in. The main model writes a plan through a small CLI; Haiku/Sonnet builders implement each task in disposable contexts; a deterministic SubagentStop hook re-runs every builder's verify command and sends false claims back for restatement; a PreToolUse gate refuses direct edits above the file floor until a plan exists | `/xend:plan`, session block, `scripts/subagent-stop.js`, `scripts/pre-edit-gate.js` |
+| Stay small | the whole per-session footprint is ~413 cache-write tokens (a 709-byte session block and two one-line builder descriptions), down from ~1,400; utilities are user-only skills, which Claude Code does not list to the model | session block, `extras/` |
+| Say less | caveman-compatible terse style (`lite`, `full`, `ultra`); code, commands, paths, errors and numbers stay exact, and anything written to files, commits or PRs stays in normal prose | session block, `/xend:terse` |
+| Take fewer turns | after an `Edit`, run the project's quick tests (allowlisted command, bounded, off when the suite is slow) and hand the result to the model with the edit, so it does not spend a turn running them; a work rule against read-backs and searches for files the task already names | PostToolUse hook, session block |
+| Read less | deterministic, recoverable shaping of tool results: escape codes, progress bars, repeated lines, passing-test rows and install chatter removed; very long generic output cut to head and tail with the original saved and named; byte-identical command re-runs shortened; grep/glob lists capped with truthful totals; every marker explains itself | PostToolUse hook (`updatedToolOutput`) |
 | Reset cheaply | a checkpoint (edited files, verification commands, decisions) written before compaction and re-injected after `/compact` or `/clear`, so `/clear` becomes the default way to end a task | PreCompact hook, `/xend:checkpoint` |
 | Native levers | prompt-cache TTL, Bash output cap, MCP output cap, a `# Compact instructions` section, and (aggressive) Anthropic's server-side clearing of old tool results | `/xend:setup` |
+| Opt-in | lean build rules adapted from ponytail (`/xend:ponytail full`); architect mode, where the main model plans and verified Haiku/Sonnet builders implement (`/xend:plan on`); Haiku scout/reader and Sonnet reviewer agents (`extras/agents/`, copy to use) | see below |
 
-What xend never does: rewrite your prompts, rewrite memory files into telegraphic prose, alter a `Read` result, summarize tool output with a model, switch the main session's model, or lower effort globally. Each of those has evidence against it (see the rejected list in `docs/RESEARCH.md`).
+What xend never does: rewrite your prompts, rewrite memory files into telegraphic prose, alter a `Read` result, summarize tool output with a model, run a command that is not on its allowlist, switch the main session's model, or lower effort globally. Each of those has evidence against it (see the rejected list in `docs/RESEARCH.md`).
 
 ## Profiles
 
 | Profile | Adds | Use when |
 |---|---|---|
-| `lite` | terse `lite`, noise-only output cleanup, repeat shortening, audits, plus lean `lite` (xend's adapted ruleset) | you want a conservative start and your own numbers first |
-| `balanced` (default) | terse `full`, structured shaping (tests, installs, long generic output), delegation, checkpoints, plus lean `full` (xend's adapted ruleset); architect mode is opt-in (`/xend:plan on`) | everyday work |
-| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental), plus lean `full` (adapted text; set `XEND_PONYTAIL_TEXT=upstream` for the upstream-verbatim ruleset JetBrains measured, ~1,400 tokens more per session) | long sessions; validate with the bench first |
+| `lite` | terse `lite`, noise-only output cleanup, repeat shortening, audits | you want a conservative start and your own numbers first |
+| `balanced` (default) | terse `full`, structured shaping (tests, installs, long generic output), auto-test after edits, checkpoints | everyday work |
+| `aggressive` | tighter caps, ranged reads of very large files, server-side context clearing (experimental) | long sessions; validate with the bench first |
 
-Switch with `/xend:profile <name>` or a `.xend.json` in the repo. Every transform has a kill switch (`XEND_SHAPE_TESTRUNNERS=0`, `XEND_TERSE=off`, ...). Details: `docs/PROFILES.md`.
+Lean build rules and architect mode are opt-in in every profile (`/xend:ponytail full`, `/xend:plan on`): both were measured and neither paid for itself on the bench (see below). Switch profiles with `/xend:profile <name>` or a `.xend.json` in the repo. Every transform has a kill switch (`XEND_AUTOTEST=0`, `XEND_SHAPE_TESTRUNNERS=0`, `XEND_TERSE=off`, ...). Details: `docs/PROFILES.md`.
 
 ## What to expect
 
@@ -112,7 +112,8 @@ Every mechanism follows the same rules, and the benchmark exists to catch violat
 4. `Read` results are never altered. Grep and Glob caps keep the true counts.
 5. Nothing shapes inside subagents.
 6. Promotion of a profile requires the bench to pass three gates at once: pass-rate delta not worse than -3 points, cost confidently lower, turns not higher.
-7. A subagent's claim is never trusted unverified: when its `Verification: <command> -> ...` line matches the allowlist, xend re-runs the command itself; every citation it makes is checked against the real files; a mismatch or a bad citation is sent back to the subagent for restatement; a command outside the allowlist is recorded as unverifiable, never run and never trusted as a PASS.
+7. The auto-test runs only allowlisted test commands (the same allowlist the verifier uses), never inside subagents and never after `Write`, with a 20-second timeout; a suite slower than 8 seconds switches it off for the session, and a suite that cannot be collected yet produces no note at all. Its note names the command it ran, so a pass is never mistaken for the task's own test.
+8. A subagent's claim is never trusted unverified: when its `Verification: <command> -> ...` line matches the allowlist, xend re-runs the command itself; every citation it makes is checked against the real files; a mismatch or a bad citation is sent back to the subagent for restatement; a command outside the allowlist is recorded as unverifiable, never run and never trusted as a PASS.
 
 ## Benchmark
 
@@ -120,6 +121,13 @@ Every mechanism follows the same rules, and the benchmark exists to catch violat
 bash bench/selftest.sh                                  # every task fails before its fix and passes after
 node bench/run.js --runs 3 --model sonnet --effort low  # paired baseline vs xend
 node bench/analyze.js                                   # merged report with CIs, sign test, MDE, verdict
+```
+
+Every child runs as a plain local `claude -p` with an explicit local tool set (`--toolset local`, the default), and each arm first makes one warm-up request so no arm pays the shared cache write by running first. Arms can load the plugin from any checkout (`label:xend@/path/to/checkout:sonnet`, or `--arms-file` with per-arm environment), which is how the previous release and this one run side by side in one paired pass:
+
+```bash
+git worktree add ../xend-main origin/main
+node bench/run.js --arms "baseline,xend-main:xend@../xend-main:sonnet,xend-new:xend:sonnet" --runs 2 -j 4
 ```
 
 21 tasks: bugfix, feature, refactor, reading-heavy, navigation, Q&A, plus five adversarial tasks designed to catch condensers that hide the middle of an output, a diff hunk, a debug print, grep hits past a cap, or that minify a file the model must edit. Two more, `project-*`, are bigger multi-file tasks with hidden tests and partial credit (`test.sh` prints `SCORE: p/t` instead of a flat pass/fail) — where "one model does everything" is compared against architect mode with a multi-arm run, e.g.:

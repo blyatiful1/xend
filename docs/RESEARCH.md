@@ -40,6 +40,11 @@ environment are marked *(measured here)*.
    solo Sonnet at equal quality, because builders pay cold prefixes and the planner pays for its
    briefs in output tokens. The plain layers measured -24.6%, -3.9% and +14.6% against no plugin on the same three long
    tasks (mean -4.6%, single trials): cheaper on two, dearer on one.
+9. A plugin's own prefix is its first cost, and it was bigger than estimated: measured through a
+   logging proxy, xend added ~1,400 cache-write tokens to every session (and Claude Code now
+   writes the cache at 2x the input price). Cutting that to ~413 tokens and removing the "run the
+   tests" turn with a hook (H24) moved the short-task suite from +9.3% to about -1% against no
+   plugin at equal or better quality (runs r8, r10, r11; section 7b).
 
 ## 1. Where the tokens go
 
@@ -90,9 +95,9 @@ Each entry: **mechanism** → **xend implementation** → expected saving → ex
 
 **H5. Terse output style.** Drop articles, filler, hedging, narration, restated diffs and closing summaries; keep code, identifiers, errors, numbers and negations exact; write normal prose for anything persisted outside chat and for safety warnings. → Rules injected once per session (caveman-compatible levels `lite`, `full`, `ultra`; `/xend:terse` switches). → Saving: 8-10% of output tokens in agentic coding (JetBrains), up to 50% in chat-style Q&A (caveman's own eval vs a plain "be concise" control). → Quality: no detectable change (p = 0.82, n = 82). → Grade A. → Validation: bench Q&A tasks; output-token delta. → Status: `lite` level in `lite`, `full` in `balanced` and `aggressive`.
 
-**H6. Delegate bulky, verifiable work to cheaper models.** A Haiku scout that returns citations, a Haiku reader that condenses an artifact, a Sonnet worker for fully specified changes. → `agents/*.md` with `model:`/`effort:` frontmatter; `/xend:route` states the contract: accept only after verification, escalate one tier on failure, never switch the main model. → Saving: cost rather than tokens; the parent context absorbs a few hundred tokens instead of tens of thousands (Anthropic: a subagent doing 10k tokens of work that returns 500 saves 9.5k). → Quality: neutral when verified; the documented risk is confident wrong citations from small models, which verification catches. → Grade B. → Validation: bench navigation tasks; per-model usage in results. → Status: shipped; the model decides when to use them.
+**H6. Delegate bulky, verifiable work to cheaper models.** A Haiku scout that returns citations, a Haiku reader that condenses an artifact, a Sonnet worker for fully specified changes. → `agents/*.md` with `model:`/`effort:` frontmatter; `/xend:route` states the contract: accept only after verification, escalate one tier on failure, never switch the main model. → Saving: cost rather than tokens; the parent context absorbs a few hundred tokens instead of tens of thousands (Anthropic: a subagent doing 10k tokens of work that returns 500 saves 9.5k). → Quality: neutral when verified; the documented risk is confident wrong citations from small models, which verification catches. → Grade B. → Validation: bench navigation tasks; per-model usage in results. → Status: shipped; the model decides when to use them. **Update:** plain xend spawned no subagent on any project-bench task (r6, r7b, r9), and every plugin agent is listed in every session, so `xend-scout`, `xend-reader` and `xend-reviewer` moved to `extras/agents/` (copy to use; as user agents they also honour `omitClaudeMd`). Only the two architect-mode builders still ship as plugin agents.
 
-**H7. Reading discipline and structure-first reading.** Locate before reading, read by range, never re-read unchanged files, verify edits with a diff. Structure-aware retrieval improves quality while cutting tokens (cAST, repo map). → Session rules; `xend-scout`; in `aggressive`, a PreToolUse hook turns an unranged Read of a file with 800+ lines into a ranged read of 250 lines with truthful `numLines`/`totalLines`, so the model continues by range. An earlier design that replaced the file content with a synthesized outline was dropped: a heuristic outline can miss a definition and read as "this symbol does not exist". → Saving: *(measured here)* the reading-discipline block alone took the log-needle task from 8 turns and 455k tokens to 4 turns and 206k; potentially the largest behavioral lever given the reading share. → Quality: positive in the retrieval literature; the range limiter risks one extra turn when the model needed a later part of the file. → Grade A for the principle, C for the specific transform. → Validation: bench big-file task; turn deltas. → Status: rules in all profiles; range limiter in `aggressive`. Structure-aware retrieval (enclosing-function expansion of grep hits, a repo map) is the next lever to build.
+**H7. Reading discipline and structure-first reading.** Locate before reading, read by range, never re-read unchanged files, verify edits with a diff. Structure-aware retrieval improves quality while cutting tokens (cAST, repo map). → Session rules; `xend-scout`; in `aggressive`, a PreToolUse hook turns an unranged Read of a file with 800+ lines into a ranged read of 250 lines with truthful `numLines`/`totalLines`, so the model continues by range. An earlier design that replaced the file content with a synthesized outline was dropped: a heuristic outline can miss a definition and read as "this symbol does not exist". → Saving: *(measured here)* the reading-discipline block alone took the log-needle task from 8 turns and 455k tokens to 4 turns and 206k; potentially the largest behavioral lever given the reading share. → Quality: positive in the retrieval literature; the range limiter risks one extra turn when the model needed a later part of the file. → Grade A for the principle, C for the specific transform. → Validation: bench big-file task; turn deltas. → Status: rules in all profiles; range limiter in `aggressive`. The rule no longer says "Grep or Glob before Read" or "verify edits with a targeted read or git diff": the first sent the model searching for files the task already named, the second bought a read-back turn after every edit. The shipped wording: few turns, independent calls in one message, open named files directly, never re-read a file to confirm an edit. Structure-aware retrieval (enclosing-function expansion of grep hits, a repo map) is the next lever to build.
 
 **H8. Test-runner and package-manager noise.** Passing-test rows and dependency-resolution chatter carry no decision-relevant information; failures, tracebacks, warnings, skipped rows, the model's own debug prints and summary lines do. → Line classifiers that only drop known noise patterns (a drop-list, never "keep only known signal", which would drop the unknown), applied only to outputs of 60+ lines because default runner modes have little to remove. Anthropic's costs page ships the same idea as a grep filter. → Saving: proportional to suite size in verbose modes. → Quality: neutral by construction for known runners; the adversarial print-debugging task checks that debug output survives. → Grade B for the idea, C for the classifiers. → Validation: unit tests on pytest, jest, go test, cargo, unittest, mocha samples; bench test-triage and print-debugging tasks. → Status: `balanced`.
 
@@ -108,9 +113,9 @@ Each entry: **mechanism** → **xend implementation** → expected saving → ex
 
 **H14. Native Bash output cap.** Claude Code's `bashOutputMaxChars` (default 30,000, persisted to a file beyond that) is the right place for the hard cap; xend shapes below it. → 8,000 in `balanced` via setup. → Grade C. → Status: opt-in setting.
 
-**H15. The condensed-output contract prevents the rtk failure mode.** The model must know that a condensed result is complete, where the original is, and that re-running will not show more. *(observed here)*: a marker-only rewrite without explanation made Haiku spend its reply complaining about hooks. → Stable paragraph in the session block plus a self-explanatory marker on every shaped result. → Grade A for the failure, C for the remedy. → Validation: turn deltas in the bench must not rise. → Status: shipped.
+**H15. The condensed-output contract prevents the rtk failure mode.** The model must know that a condensed result is complete, where the original is, and that re-running will not show more. *(observed here)*: a marker-only rewrite without explanation made Haiku spend its reply complaining about hooks. → Stable paragraph in the session block plus a self-explanatory marker on every shaped result. (Since r8 the paragraph is gone and the marker carries the whole contract: what was removed, that nothing decision-relevant was, that the rest is complete and re-running is for changed state only, and where the original is. A session in which nothing is condensed now pays nothing for the explanation.) → Grade A for the failure, C for the remedy. → Validation: turn deltas in the bench must not rise. → Status: shipped.
 
-**H16. Plugin overhead must be smaller than its savings, and on micro-tasks it is not.** Skill descriptions, agent descriptions and the session block are prefix cost paid once per session (cache write at 1.25x) and then re-read every turn (0.1x). *(measured here, run r2: 21 tasks x 2 trials, 4.5 turns on average)*: uncached input +12.7%, total tokens +6.4%, cost +9.0% (95% CI +6.1% to +11.9%) with the original ~1,250-token prefix, while quality rose 4.8 points and output tokens fell 3.2%. The shaping layer had nothing to condense on 20 of the 21 tasks. The prefix was then cut to ~765 tokens; run r3 measured cost +3.5% (interval including zero) with output tokens -8.6%. The conclusion stands regardless of the trim: on five-turn tasks a plugin cannot save money, because the only costs in play are the fixed prefix and a few hundred output tokens; xend's savings come from long sessions, reading-heavy work, and the native levers the bench does not exercise. → Grade A (own paired measurement). → Validation: bench by turn count; a long-session suite is the missing evidence.
+**H16. Plugin overhead must be smaller than its savings, and on micro-tasks it is not.** Skill descriptions, agent descriptions and the session block are prefix cost paid once per session (cache write at 1.25x) and then re-read every turn (0.1x). *(measured here, run r2: 21 tasks x 2 trials, 4.5 turns on average)*: uncached input +12.7%, total tokens +6.4%, cost +9.0% (95% CI +6.1% to +11.9%) with the original ~1,250-token prefix, while quality rose 4.8 points and output tokens fell 3.2%. The shaping layer had nothing to condense on 20 of the 21 tasks. The prefix was then cut to ~765 tokens; run r3 measured cost +3.5% (interval including zero) with output tokens -8.6%. The conclusion stands regardless of the trim: on five-turn tasks a plugin cannot save money, because the only costs in play are the fixed prefix and a few hundred output tokens; xend's savings come from long sessions, reading-heavy work, and the native levers the bench does not exercise. → Grade A (own paired measurement). → Validation: bench by turn count; a long-session suite is the missing evidence. **Update (runs r8, r10, Claude Code 2.1.283):** the prefix was measured exactly for the first time, through a request-logging proxy and the bench's warm-up cache writes: the shipped plugin added **1,372-1,419 cache-write tokens per session** (session block 2,869 B, five agent descriptions, a routing skill; this text tokenizes at ~2.7 characters per token, not 4), and Claude Code now writes the cache at the 1-hour TTL, 2x the input price. Cutting it to **~413 tokens** (a 709 B block, two one-line builder descriptions, no routing skill) and adding the auto-test (H24) turned the same suite from **+9.3% (95% CI +4.9% to +14.0%, gate FAIL) for the previous build** to **-1.2% (CI -5.0% to +3.7%)** in the same run (r10), with pass rate +2.4 points, output tokens -12.4% and turns -0.3; a build with the cut prefix and the lean text still on measured -5.1% (CI -13.1% to +1.1%) in r8.
 
 **H17. Subagents without memory files and at low effort.** `omitClaudeMd: true` and `effort: low` on scout and reader remove the memory prefix and the reasoning budget from cheap, mechanical work. → Grade C. → Status: shipped. **Correction** *(verified here, Claude Code 2.1.272)*: plugin agents do not honour `omitClaudeMd` at all, so this claim was wrong for `xend-scout` and `xend-reader` as shipped; see H23.
 
@@ -137,7 +142,7 @@ bounds satisfy Δcost ≤ +3.0%, Δpass ≥ -3.0 pp and Δturns ≤ +0.25; anyth
 to opt-in on `lite` and `balanced`, and a pass-rate or turn regression turns it off everywhere.
 Outcome of that gate (runs r4 and r5): the adapted text stays on in every profile (within noise of
 no ponytail); the upstream-verbatim text failed the cost threshold (+16.7%) and is opt-in everywhere,
-because the JetBrains number was measured on a different, longer task distribution.
+because the JetBrains number was measured on a different, longer task distribution. **Update (r8 and an ablation):** with the prefix cut, the adapted text still bought nothing measurable, and on `adv-middle-of-output` it made the model add the missing variable with an empty value, which the grader rejects: lean on passed 3 of 6 runs, lean off 3 of 3, no plugin 3 of 3 (traced: the model found the decisive log line every time and only left the value blank). Under the pre-registered rule above ("a pass-rate or turn regression turns it off everywhere"), lean rules are now **opt-in in every profile** (`/xend:ponytail full`, `XEND_PONYTAIL=full`).
 
 **H20. Plan-then-build keeps reading out of the expensive model's context.** Mechanism: a model
 that never reads file bodies cannot re-bill them every later turn; cheap subagents read and write
@@ -202,6 +207,40 @@ the memory-file prefix, but *(verified here, Claude Code 2.1.272)* plugin agents
 `omitClaudeMd`, `hooks`, `mcpServers` or `permissionMode` at all — the field is inert for a
 plugin-installed agent and is kept in the agent files only as a hint for a user- or project-level
 copy. `tools:` is the only prefix lever that actually reaches a plugin subagent.
+
+**H24. The turn is the unit of cost on short tasks, and a hook can remove one the model will not.**
+Mechanism: every model call re-reads the whole context, so on a four-turn task one saved call is
+worth more than any amount of output trimming (at Sonnet prices with the 1-hour cache, ~$0.005 of
+cache reads plus the call's own output, against ~$0.0003 for 30 fewer output tokens). The commonest
+avoidable call is "now run the tests" right after an edit. → First attempt, a session-block rule
+("send an edit and the test command that checks it in the same message; a typical fix is three
+turns"): *(verified here)* Claude Code does run same-message tool calls in order (an `Edit` followed
+by `cat` printed the edited text), but Sonnet at low effort kept the edit and the test in separate
+turns in every traced run, most likely because Claude Code's own system prompt says to call
+dependent tools sequentially. → Shipped instead: `scripts/lib/autotest.js`, a PostToolUse hook on
+`Edit|MultiEdit` that runs the project's quick tests (allowlisted command, 20 s timeout, off for the
+session when a run exceeds 8 s) and hands the result to the model with the edit. *(verified here)*:
+on three bugfix tasks the model answered from the attached `6 passed` note and finished in three
+turns instead of four. Two refinements came from traced project runs: it never runs after `Write`
+(a file being created is half a feature), and a suite that cannot be collected yet (a module the
+tests import does not exist) produces no note, because the traced log-pipeline run spent output on
+acknowledging exactly that. → Saving: bench r8 isolates it (same build with and without it, 42
+paired runs each): turns 4.60 to 4.12 and cost -5.4 points against the no-auto-test arm; the bugfix
+tasks went from four turns to three. → Quality risk: the model trusts a partial result (the suite
+xend chose, not the one the task names); every note names its command, and a pass on the wrong suite
+is the failure mode to watch for. → **Grade B** (own paired measurement, one environment). → Status:
+on in `balanced` and `aggressive`, off in `lite`.
+
+**H25. A benchmark run from inside a hosted session measures the host, not the plugin.** Three
+confounds found and removed in this round *(verified here with a request-logging proxy)*: (1) a
+child `claude -p` inherits the hosting session's `CLAUDE_CODE_ENTRYPOINT`, which in a cloud session
+brought a 38k-token host tool set, a longer system prompt and a side request per run ("status
+summary") into both arms; (2) `--allowedTools` pre-approves tools but does not restrict which ones are
+*listed*, so the bench now passes an explicit local-like `--tools` set; (3) whichever arm runs first
+pays the shared prefix's cache write (15k against 3.4k tokens in one pair), so every run now starts
+with one warm-up per arm, run one at a time and through one tool call. The earlier runs (r1-r7) stay
+valid as paired comparisons, but their percentages are relative to a heavier base than a local user
+has; with the local base (~18k cached tokens per call) a fixed plugin prefix weighs more, not less.
 
 ## 4. Rejected or deferred
 
@@ -284,6 +323,32 @@ power per run and are the next step for the suite.
 - Smoke test 1 (architect paragraph in the session block, no gate; a headless Sonnet session given a three-module package to implement): the model did the task itself — 10 turns, no plan, zero subagents, $0.28. The rule was read and ignored.
 - Smoke test 2 (a first, soft gate that refused the third direct edit once and named `plan off` as the way out): the model ran `plan off` and finished directly — 11 turns, one denial, $0.18. This is why the shipped gate (`docs/SPEC-architect.md` section 13, H22) never advertises an exit.
 - The session block measured with `node scripts/xend-cli.js context | wc -c` at `balanced`: 2,869 B / ~755 tokens with architect mode on (the default), 1,680 B / ~442 tokens with `XEND_ARCHITECT=0` — the architect paragraph costs about 1,189 B / ~313 tokens (see `docs/ARCHITECTURE.md`).
+
+## 7b. Verified in this environment (Claude Code 2.1.283)
+
+- A request-logging reverse proxy (`ANTHROPIC_BASE_URL` pointed at a local forwarder that writes each
+  request body to disk) shows exactly what a plugin adds. SessionStart `additionalContext`, the agent
+  listing and the skill listing all land in one `system`-role message placed after the user's
+  prompt; tools and the system prompt are byte-identical with and without the plugin.
+- The cache is written at the 1-hour TTL (`ephemeral_1h_input_tokens`), 2x the input price, in
+  headless runs. With cache reads at 0.1x, a token injected at session start costs about 2 + 0.1 x
+  turns times the input price: 2.4x on a four-turn task.
+- Per-session plugin cost, as first-request cache-write tokens over a no-plugin run: previous
+  release +1,372 (proxy) / +1,416 (bench warm-up); this release +413. The text tokenizes at ~2.7
+  characters per token.
+- Claude Code executes several tool calls from one assistant message in order: an `Edit` and a
+  `cat` of the same file in one message printed the edited content.
+- Sonnet 5 at low effort did not follow a session-block rule to put an edit and its test in one
+  message (four traced runs); a PostToolUse hook that runs the tests itself removed that turn.
+- PostToolUse `additionalContext` on `Edit` reaches the model as a system reminder right after the
+  tool result; the model answered from an attached `6 passed` note without running the tests.
+- A child `claude -p` started from inside a hosted session inherits `CLAUDE_CODE_ENTRYPOINT` and with
+  it the host's tool set, system prompt and a side request per run; unsetting that one variable gives
+  a plain local `claude -p` (entrypoint `sdk-cli`) with authentication intact. `--allowedTools` does
+  not restrict which tools are listed; `--tools` does.
+- The first job of a run triggers a one-off ~27k-token cache write outside the main loop
+  (`modelUsage` minus `usage`), paid by whichever arm gets there first (r8: the no-plugin arm; r10: the
+  final build). The warm-up now makes one tool call so that path is primed before timed jobs.
 
 ## 8. Sources
 

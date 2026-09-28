@@ -372,7 +372,9 @@ async function main() {
     return;
   }
   if (opts.warmup) {
-    const warmTask = { name: 'warmup', dir: TASKS_DIR, prompt: 'Reply with the single word: ok', max_turns: 2, timeout_s: 180 };
+    // One tool call, so the tool-result path is primed too: without it the first real job of a run
+    // paid a one-off ~27k-token cache write that landed on whichever arm happened to run first (r8, r10).
+    const warmTask = { name: 'warmup', dir: TASKS_DIR, prompt: 'Run the shell command `echo ok` with the Bash tool, then reply with the single word: ok', max_turns: 3, timeout_s: 180 };
     // one at a time: the first warm-up writes the shared prefix, the rest read it
     await pool(armSpecs, 1, async (arm) => {
       const work = fs.mkdtempSync(path.join(workRoot, 'warmup-'));
