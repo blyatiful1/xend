@@ -108,3 +108,38 @@ test('toolArgs: local toolset makes the available set explicit and pre-approves 
 test('toolArgs: host toolset keeps the legacy behaviour (no --tools, only task tools approved)', () => {
   assert.deepStrictEqual(toolArgs('Bash,Read', 'host'), { tools: null, allowedTools: 'Bash,Read' });
 });
+
+test('jobEnv: an arms-file env reaches a baseline arm; the global --arm-env reaches xend arms only', () => {
+  const { jobEnv } = require('../bench/run.js');
+  const opts = { profile: 'balanced', arm_env: { XEND_SHAPE: '0' } };
+  const base = jobEnv({ kind: 'baseline', env: { CLAUDE_CODE_PROMPT_CACHE_TTL: '5m' } }, opts, '/s', 'Bash,Read');
+  assert.deepStrictEqual(base, { XEND_STATE_DIR: '/s', CLAUDE_CODE_PROMPT_CACHE_TTL: '5m' });
+  const x = jobEnv({ kind: 'xend', mode: 'plain', env: { XEND_TERSE: 'off' } }, opts, '/s', 'Bash,Read');
+  assert.strictEqual(x.XEND_SHAPE, '0');
+  assert.strictEqual(x.XEND_TERSE, 'off');
+  assert.strictEqual(x.XEND_TRUST_TESTS, '1');
+});
+
+test('cleanEnv: an ambient cache-lifetime setting never reaches an arm unless the arm sets it', () => {
+  const { cleanEnv } = require('../bench/run.js');
+  const saved = Object.assign({}, process.env);
+  try {
+    process.env.CLAUDE_CODE_PROMPT_CACHE_TTL = '5m';
+    process.env.FORCE_PROMPT_CACHING_5M = '1';
+    const e = cleanEnv({});
+    assert.strictEqual(e.CLAUDE_CODE_PROMPT_CACHE_TTL, undefined);
+    assert.strictEqual(e.FORCE_PROMPT_CACHING_5M, undefined);
+    assert.strictEqual(cleanEnv({ CLAUDE_CODE_PROMPT_CACHE_TTL: '1h' }).CLAUDE_CODE_PROMPT_CACHE_TTL, '1h');
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
+});
+
+test('normalizeArm keeps per-arm claude args; parseArgs flags --help and refuses unknown arguments', () => {
+  const { parseArgs } = require('../bench/run.js');
+  assert.deepStrictEqual(normalizeArm({ label: 'b5', kind: 'baseline', args: ['--append-system-prompt', 'arm b5'] }, { model: 'sonnet' }).args, ['--append-system-prompt', 'arm b5']);
+  assert.strictEqual(parseArgs(['--help']).help, true);
+  assert.match(parseArgs(['--runs', '2', '--hepl']).error, /unknown argument: --hepl/);
+  assert.strictEqual(parseArgs(['--runs', '2']).error, undefined);
+});

@@ -1,7 +1,7 @@
 {
   "name": "xend",
   "displayName": "xend",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Spend fewer tokens in Claude Code without losing quality: lossless tool-output shaping, terse output style, tests run with each edit, context checkpoints, native-lever setup, and a paired benchmark that measures it.",
   "author": {
     "name": "blyatiful1",

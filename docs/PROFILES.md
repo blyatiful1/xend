@@ -23,7 +23,7 @@ Any layer may set `"profile"` and override individual keys. Example `.xend.json`
 | `ponytailText` (used when `ponytail` is on: **`adapted` is xend's condensation; `upstream` is the upstream-verbatim text JetBrains measured**) | `adapted` | `adapted` | `adapted` |
 | `upstream.ponytail` (`auto` defers to an installed, injecting ponytail plugin; `yield` always defers; `ignore` never does) | `auto` | `auto` | `auto` |
 | `ponytailStrict` (drop every xend-authored bridging sentence so the ponytail portion is byte-identical to upstream's own hook output; for replication runs) | `false` | `false` | `false` |
-| `shape.maxChars` (head+tail beyond this, generic output kinds only; never diffs or test runs) | 30000 (native cap only) | 12000 | 8000 |
+| `shape.maxChars` (beyond this, generic output and searches are folded, then cut to head and tail with error lines kept; never diffs or test runs) | 30000 (native cap only) | 12000 | 8000 |
 | `shape.stripAnsi` (skipped for terminal-facing commands), progress bars, blank runs, `collapseRepeats` (4+ identical lines, count kept) | on | on | on |
 | `shape.testRunners` (drop known passing/progress rows only; outputs of 60+ lines) | off | on | on |
 | `shape.packageManagers` (drop download/resolve chatter; warnings and errors kept) | off | on | on |

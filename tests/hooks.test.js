@@ -105,3 +105,39 @@ test('record-edit: trust claimed in the session\'s cached config.json is ignored
   assert.equal(out.hookSpecificOutput, undefined, 'no test ran');
   assert.match(out.systemMessage, /waiting for permission/);
 });
+
+function bash(sid, d, command, stdout) {
+  return hook('post-tool-use.js', { hook_event_name: 'PostToolUse', session_id: sid, cwd: d, tool_name: 'Bash', tool_use_id: 'b-' + sid,
+    tool_input: { command }, tool_response: { stdout, stderr: '', interrupted: false, isImage: false } }, { XEND_PROFILE: 'balanced' });
+}
+
+test('post-tool-use: a long grep of a log keeps the rare ERROR line and does not claim to be complete', () => {
+  const d = tmp();
+  const lines = [];
+  for (let i = 0; i < 400; i++) lines.push((i * 8 + 5) + ':2026-09-10T02:' + String(i % 60).padStart(2, '0') + ':00Z WARN  orders-api: slow query for order ' + (10065 + i * 104) + ' (' + (i * 56 % 240) + 'ms)');
+  lines.splice(250, 0, '2518:2026-09-10T02:14:33Z ERROR orders-api: runbook RB-402: pool requires timeout_seconds >= 30');
+  const out = bash('g1', d, "grep -n -i -E 'warn|error' logs/app.log", lines.join('\n'));
+  const text = out.hookSpecificOutput.updatedToolOutput.stdout;
+  assert.match(text, /timeout_seconds >= 30/);
+  assert.match(text, /not the whole output/);
+  assert.doesNotMatch(text, /treat this as complete/);
+  const full = /Full output: (\S+)$/.exec(text)[1];
+  assert.strictEqual(fs.readFileSync(full, 'utf8'), lines.join('\n'), 'the original is saved where the marker says');
+});
+
+test('post-tool-use: merged grep hits keep every line number and may say complete', () => {
+  const d = tmp();
+  const lines = [];
+  for (let f = 0; f < 10; f++) for (let l = 5; l < 140; l += 4) lines.push('pkg/mod_' + f + '.py:' + l + ':    return fmt_money(amount)');
+  const text = bash('g2', d, 'grep -rn fmt_money pkg', lines.join('\n')).hookSpecificOutput.updatedToolOutput.stdout;
+  assert.match(text, /pkg\/mod_3\.py:5,9,13,.*,137:    return fmt_money\(amount\)/);
+  assert.match(text, /treat this as complete/);
+});
+
+test('post-tool-use: a diff is never rewritten for whitespace, and a trim that cannot pay for its marker is dropped', () => {
+  const d = tmp();
+  const diff = 'diff --git a/x.py b/x.py\n@@ -1,40 +1,40 @@\n' + Array.from({ length: 40 }, (_, i) => (i % 3 ? ' ' : '-') + 'line ' + i + '  ').join('\n') + '\n \n \n \n';
+  assert.strictEqual(bash('d1', d, 'git diff', diff), null);
+  const small = '\x1b[32m' + 'x'.repeat(400) + '\x1b[0m\n' + 'y'.repeat(300);
+  assert.strictEqual(bash('d2', d, 'make build', small), null, 'removing 9 bytes of colour codes is not worth a marker line');
+});

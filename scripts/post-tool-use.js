@@ -48,6 +48,11 @@ function main() {
 // left is complete for decisions, and where the original is. The session block no longer explains
 // it, so a session in which nothing is condensed pays nothing for the explanation.
 const COMPLETE = 'Nothing decision-relevant was removed: treat this as complete and re-run only if state may have changed';
+// Said instead when lines were folded or cut: claiming completeness there is how a condenser makes
+// the model act on a result that is missing the one line it needed.
+const INCOMPLETE = 'Lines were left out, so this is not the whole output: if what you need is not here, read the full output or narrow the command';
+// A change has to save at least this much after paying for its own marker line.
+const MIN_NET_SAVING = 200;
 
 function marker(note, fullPath, complete) {
   return '[xend] ' + note + (complete ? '. ' + COMPLETE : '') + (fullPath ? '. Full output: ' + fullPath : '');
@@ -127,18 +132,25 @@ function handleBash(input, resp, sc, dir, id) {
 
   // 2) shaping
   const so = shape.shapeBashText(stdout, kind, sc, cmd);
-  const se = stderr ? shape.shapeBashText(stderr, kind, Object.assign({}, sc, { maxChars: Math.max(2000, Math.floor(sc.maxChars / 2)) }), cmd) : { text: '', changed: false, kinds: [], before: 0, after: 0 };
+  const se = stderr ? shape.shapeBashText(stderr, kind, Object.assign({}, sc, { maxChars: Math.max(2000, Math.floor(sc.maxChars / 2)) }), cmd) : { text: '', changed: false, kinds: [], before: 0, after: 0, lossy: false };
   if (!so.changed && !se.changed) return null;
   const before = combined.length;
+  const lossy = so.lossy || se.lossy;
   const savedChars = (so.before - so.after) + (se.before - se.after);
-  if (savedChars < 150) return null; // not worth a marker line
-  // Name a recovery path only when enough was removed to matter; a path invites a re-read.
-  const full = savedChars >= 2000 ? (resp.persistedOutputPath || state.persistOriginal(dir, id, combined)) : null;
+  if (savedChars < MIN_NET_SAVING) return null;
+  // Name a recovery path when lines were left out, or when enough was removed to matter; a path
+  // invites a re-read, so a small lossless trim goes without one.
   const kinds = so.kinds.concat(se.kinds.map((k) => 'stderr:' + k));
-  const note = 'Condensed ' + shape.describe(so.kinds.length ? so.kinds : se.kinds, shape.countLines(stdout || stderr), shape.countLines(so.changed ? so.text : se.text)) + '. Errors, failures, diffs and summaries are kept in full' + (resp.persistedOutputPath ? '; the original was already cut by Claude Code at its output cap' : '');
-  const newStdout = so.text + (so.text.endsWith('\n') ? '' : '\n') + marker(note, full, true);
+  const note = 'Condensed ' + shape.describe(so.kinds.length ? so.kinds : se.kinds, shape.countLines(stdout || stderr), shape.countLines(so.changed ? so.text : se.text)) +
+    (resp.persistedOutputPath ? ' (Claude Code had already cut the original at its output cap)' : '') +
+    (lossy ? '. ' + INCOMPLETE : '. Errors, failures, diffs and summaries are kept in full');
+  const fullPath = lossy || savedChars >= 2000 ? (resp.persistedOutputPath || path.join(dir, 'tool-' + state.safeId(id) + '.txt')) : null;
+  const newStdout = so.text + (so.text.endsWith('\n') ? '' : '\n') + marker(note, fullPath, !lossy);
+  const after = newStdout.length + se.text.length;
+  if (before - after < MIN_NET_SAVING) return null; // the marker has to pay for itself
+  if (fullPath && !resp.persistedOutputPath && !state.persistOriginal(dir, id, combined)) return null;
   const output = Object.assign({}, resp, { stdout: newStdout, stderr: se.text });
-  return { changed: true, output, before, after: newStdout.length + se.text.length, kinds };
+  return { changed: true, output, before, after, kinds };
 }
 
 // Read results are never altered: the model's next Edit must match the file on disk byte for
@@ -169,6 +181,17 @@ function handleGrep(input, resp, sc, dir, id) {
     const lines = resp.content.split('\n');
     if (!max || lines.length <= max) return null;
     const full = state.persistOriginal(dir, id, resp.content);
+    const m = shape.mergeSearchHits(resp.content);
+    if (m.merged) {
+      const mlines = m.text.split('\n');
+      if (mlines.length <= max) {
+        const note = m.merged + ' hits with the same text in the same file merged onto one line as path:line,line,...:text; every match is listed';
+        const content = m.text + '\n' + marker(note, full, true);
+        if (resp.content.length - content.length < MIN_NET_SAVING) return null;
+        const output = Object.assign({}, resp, { content, numLines: mlines.length + 1 });
+        return { changed: true, output, before: resp.content.length, after: content.length, kinds: ['merged:' + m.merged] };
+      }
+    }
     const keepHead = Math.floor(max * 0.7), keepTail = max - keepHead;
     const kept = lines.slice(0, keepHead).concat(['... [xend: ' + (lines.length - max) + ' matching lines omitted] ...'], lines.slice(lines.length - keepTail));
     const note = 'Showing ' + max + ' of ' + lines.length + ' matching lines (' + (resp.numFiles || 'several') + ' files); the count fields are the true totals. Narrow the pattern or path, or read the full list';
@@ -203,13 +226,18 @@ function shapeMcpText(text, sc) {
   return r;
 }
 
+function mcpNote(r, original) {
+  return 'Condensed ' + shape.describe(r.kinds, shape.countLines(original), shape.countLines(r.text)) + (r.lossy ? '. ' + INCOMPLETE : '');
+}
+
 function handleMcp(input, resp, sc, dir, id) {
   if (typeof resp === 'string') {
     if (resp.length < 1500) return null;
     const r = shapeMcpText(resp, sc);
     if (!r.changed || r.before - r.after < 300) return null;
-    const full = state.persistOriginal(dir, id, resp);
-    const out = r.text + '\n' + marker('Condensed ' + shape.describe(r.kinds, shape.countLines(resp), shape.countLines(r.text)), full, true);
+    const full = path.join(dir, 'tool-' + state.safeId(id) + '.txt');
+    const out = r.text + '\n' + marker(mcpNote(r, resp), full, !r.lossy);
+    if (resp.length - out.length < MIN_NET_SAVING || !state.persistOriginal(dir, id, resp)) return null;
     return { changed: true, output: out, before: resp.length, after: out.length, kinds: r.kinds };
   }
   if (Array.isArray(resp)) {
@@ -218,10 +246,11 @@ function handleMcp(input, resp, sc, dir, id) {
       if (block && block.type === 'text' && typeof block.text === 'string' && block.text.length >= 1500) {
         const r = shapeMcpText(block.text, sc);
         before += r.before; after += r.after;
-        if (r.changed && r.before - r.after >= 300) {
+        const text = r.changed && r.before - r.after >= 300 ? r.text + '\n' + marker(mcpNote(r, block.text), null, !r.lossy) : null;
+        if (text && block.text.length - text.length >= MIN_NET_SAVING) {
           changed = true; kinds.push.apply(kinds, r.kinds);
           const full = state.persistOriginal(dir, id + '-' + before, block.text);
-          return Object.assign({}, block, { text: r.text + '\n' + marker('Condensed ' + shape.describe(r.kinds, shape.countLines(block.text), shape.countLines(r.text)), full, true) });
+          return Object.assign({}, block, { text: r.text + '\n' + marker(mcpNote(r, block.text), full, !r.lossy) });
         }
       }
       return block;
