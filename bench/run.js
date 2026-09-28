@@ -5,6 +5,7 @@
 //   node bench/run.js [--arms baseline,xend] [--runs 1] [--model sonnet] [--effort low]
 //                     [--tasks a,b|glob] [--category bugfix] [--concurrency 2] [--max-budget-usd 2]
 //                     [--tools Bash,Read,Edit,Write,MultiEdit,Grep,Glob]
+//                     [--toolset local|host] [--no-warmup] [--arms-file arms.json]
 //                     [--profile balanced] [--ponytail off|lite|full|ultra] [--ponytail-text adapted|upstream]
 //                     [--ponytail-strict] [--arm-env "K=V,K2=V2"] [--out bench/results/<ts>] [--keep] [--dry-run] [--list]
 // Each run is a `claude -p` child. Results append to <out>/runs.jsonl; raw JSON per run in <out>/raw/.
@@ -14,7 +15,15 @@
 //   --arms "solo-sonnet:baseline:sonnet,solo-fable:baseline:fable,arch-fable:xend:fable:architect"
 // kind is `baseline` (no plugin) or `xend` (adds --plugin-dir + XEND_PROFILE). model overrides the
 // global --model for that arm. mode (xend only) is `architect` (XEND_ARCHITECT=1: main model plans,
-// subagents build) or `plain` (default, XEND_ARCHITECT=0).
+// subagents build) or `plain` (default, XEND_ARCHITECT=0). kind may also be `xend@<dir>` to load the
+// plugin from another checkout (e.g. the previous release), so old and new xend run in one paired pass.
+// --arms-file takes a JSON array of {label, kind, model, mode, pluginDir, env} for per-arm env.
+//
+// Environment: every child runs as a plain local `claude -p` (the hosting session's entrypoint and
+// session variables are removed) with an explicit, local-like tool set (--toolset local, the default)
+// so a cloud host's extra tools do not inflate the fixed prefix of both arms. Before the timed jobs
+// one throwaway request per arm writes the shared system+tools prefix to the prompt cache, so no
+// arm pays that cold write by the luck of running first (--no-warmup to skip).
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -23,9 +32,14 @@ const { execFile, execFileSync, spawnSync } = require('child_process');
 const ROOT = path.resolve(__dirname, '..');
 const TASKS_DIR = path.join(__dirname, 'tasks');
 const TOOLS = 'Bash,Read,Edit,Write,MultiEdit,Grep,Glob';
+// What a local Claude Code session offers by default, minus anything host-specific. Agent and Skill
+// are included so plugin agents and skills are listed exactly as they are for a real user.
+const TOOLSETS = {
+  local: 'Agent,Bash,Edit,Glob,Grep,NotebookEdit,Read,Skill,WebFetch,WebSearch,Write',
+};
 
 function parseArgs(argv) {
-  const o = { arms: ['baseline', 'xend'], runs: 1, model: 'sonnet', effort: 'low', tasks: '*', category: '', concurrency: 2, maxBudget: 2, tools: '', profile: 'balanced', ponytail: '', ponytailText: '', ponytailStrict: false, armEnv: '', out: '', keep: false, dryRun: false, list: false, extra: [] };
+  const o = { arms: ['baseline', 'xend'], runs: 1, model: 'sonnet', effort: 'low', tasks: '*', category: '', concurrency: 2, maxBudget: 2, tools: '', toolset: 'local', warmup: true, armsFile: '', profile: 'balanced', ponytail: '', ponytailText: '', ponytailStrict: false, armEnv: '', out: '', keep: false, dryRun: false, list: false, extra: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i], v = argv[i + 1];
     if (a === '--arms') { o.arms = v.split(','); i++; }
@@ -37,6 +51,9 @@ function parseArgs(argv) {
     else if (a === '--concurrency' || a === '-j') { o.concurrency = Number(v); i++; }
     else if (a === '--max-budget-usd') { o.maxBudget = Number(v); i++; }
     else if (a === '--tools') { o.tools = v; i++; }
+    else if (a === '--toolset') { o.toolset = v; i++; }
+    else if (a === '--no-warmup') o.warmup = false;
+    else if (a === '--arms-file') { o.armsFile = v; i++; }
     else if (a === '--profile') { o.profile = v; i++; }
     else if (a === '--ponytail') { o.ponytail = v; i++; }
     else if (a === '--ponytail-text') { o.ponytailText = v; i++; }
@@ -62,10 +79,39 @@ function parseArm(str, defaults) {
     return { label, kind: label, model: defaults.model, mode: 'plain' };
   }
   const label = parts[0];
-  const kind = parts[1];
+  let kind = parts[1];
+  let pluginDir = null;
+  const at = kind.indexOf('@');
+  if (at !== -1) { pluginDir = kind.slice(at + 1) || null; kind = kind.slice(0, at); }
   const model = parts[2] || defaults.model;
   const mode = kind === 'xend' && parts[3] === 'architect' ? 'architect' : 'plain';
-  return { label, kind, model, mode };
+  const arm = { label, kind, model, mode };
+  if (kind === 'xend' && pluginDir) arm.pluginDir = pluginDir;
+  return arm;
+}
+
+// Pure: normalize one entry of an --arms-file array to the parseArm shape plus optional env.
+function normalizeArm(a, defaults) {
+  defaults = defaults || {};
+  const kind = a.kind === 'xend' ? 'xend' : 'baseline';
+  const arm = { label: String(a.label), kind, model: a.model || defaults.model, mode: kind === 'xend' && a.mode === 'architect' ? 'architect' : 'plain' };
+  if (kind === 'xend' && a.pluginDir) arm.pluginDir = a.pluginDir;
+  if (a.env && typeof a.env === 'object') arm.env = Object.assign({}, a.env);
+  return arm;
+}
+
+// Pure: the --tools (available) and --allowedTools (pre-approved) lists for one job. A named
+// toolset makes the available set explicit and pre-approves all of it plus the task's own tools;
+// 'host' keeps the legacy behaviour (host default tool set, only the task tools pre-approved).
+function toolArgs(taskTools, toolset) {
+  const allowed = taskTools.split(',').filter(Boolean);
+  const avail = TOOLSETS[toolset];
+  if (!avail) return { tools: null, allowedTools: allowed.join(',') };
+  const set = avail.split(',');
+  for (const t of allowed) if (!set.includes(t) && t !== 'MultiEdit') set.push(t);
+  const allow = set.slice();
+  if (allowed.includes('MultiEdit')) allow.push('MultiEdit');
+  return { tools: set.join(','), allowedTools: allow.join(',') };
 }
 
 // Pure: parse a "K=V,K2=V2" string into a plain object -- extra env vars applied to every
@@ -114,19 +160,22 @@ function cleanEnv(extra) {
   // The baseline arm is structurally immune (it gets no --plugin-dir), so an ambient export
   // — or an upstream ponytail install on the operator's machine — would contaminate one side
   // only and look like a real effect.
-  for (const k of ['CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID', 'XEND_PROFILE', 'XEND_TERSE', 'XEND_SHAPE',
+  // CLAUDE_CODE_ENTRYPOINT: a child inheriting the hosting session's entrypoint (e.g. a cloud
+  // session's) gets that host's system prompt and side requests instead of a plain `claude -p`'s.
+  for (const k of ['CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'XEND_PROFILE', 'XEND_TERSE', 'XEND_SHAPE',
     'XEND_PONYTAIL', 'XEND_PONYTAIL_TEXT', 'XEND_UPSTREAM_PONYTAIL', 'XEND_PONYTAIL_STRICT', 'PONYTAIL_DEFAULT_MODE', 'XEND_ARCHITECT']) delete env[k];
   return Object.assign(env, extra);
 }
 
 function runClaude(task, arm, opts, work, stateDir) {
-  const tools = opts.tools || task.tools || TOOLS;
+  const ta = toolArgs(opts.tools || task.tools || TOOLS, opts.toolset);
   const budget = task.budget_usd != null ? task.budget_usd : opts.maxBudget;
   const args = ['-p', task.prompt, '--model', arm.model, '--max-turns', String(task.max_turns || 40),
-    '--max-budget-usd', String(budget), '--output-format', 'json', '--allowedTools', tools,
+    '--max-budget-usd', String(budget), '--output-format', 'json', '--allowedTools', ta.allowedTools,
     '--strict-mcp-config', '--no-session-persistence'];
+  if (ta.tools) args.push('--tools', ta.tools);
   if (opts.effort) args.push('--effort', opts.effort);
-  if (arm.kind === 'xend') args.push('--plugin-dir', ROOT);
+  if (arm.kind === 'xend') args.push('--plugin-dir', arm.pluginDir ? path.resolve(arm.pluginDir) : ROOT);
   for (const e of opts.extra) args.push(...e.split(' '));
   const extraEnv = { XEND_STATE_DIR: stateDir };
   if (arm.kind === 'xend') {
@@ -138,6 +187,7 @@ function runClaude(task, arm, opts, work, stateDir) {
     if (opts.ponytailStrict) extraEnv.XEND_PONYTAIL_STRICT = '1';
     extraEnv.XEND_ARCHITECT = arm.mode === 'architect' ? '1' : '0';
     Object.assign(extraEnv, opts.arm_env);
+    if (arm.env) Object.assign(extraEnv, arm.env);
   }
   return new Promise((resolve) => {
     const started = Date.now();
@@ -252,6 +302,7 @@ async function runJob(job, opts, outDir, workRoot) {
   const rec = {
     task: task.name, category: task.category, difficulty: task.difficulty, arm: arm.label, trial,
     arm_kind: arm.kind, arm_model: arm.model, arm_mode: arm.mode,
+    arm_plugin_dir: arm.pluginDir || null, toolset: opts.toolset,
     pass: test.pass, reason: test.reason,
     score: test.score,
     is_error: !!(j.is_error || r.err), subtype: j.subtype || (r.err ? 'spawn_error' : 'unknown'),
@@ -271,7 +322,7 @@ async function runJob(job, opts, outDir, workRoot) {
     ponytail: arm.kind === 'xend' ? (opts.ponytail || null) : null,
     ponytail_text: arm.kind === 'xend' && opts.ponytail !== 'off' ? (opts.ponytailText || null) : null,
     ponytail_strict: arm.kind === 'xend' ? !!opts.ponytailStrict : false,
-    arm_env: opts.arm_env || {},
+    arm_env: Object.assign({}, opts.arm_env || {}, arm.env || {}),
     answer_chars: (j.result || '').length,
     ts: new Date().toISOString(),
   };
@@ -304,7 +355,9 @@ async function main() {
     return;
   }
   if (!tasks.length) { console.error('no tasks matched'); process.exit(1); }
-  const armSpecs = opts.arms.map((s) => parseArm(s, { model: opts.model }));
+  const armSpecs = opts.armsFile
+    ? JSON.parse(fs.readFileSync(opts.armsFile, 'utf8')).map((a) => normalizeArm(a, { model: opts.model }))
+    : opts.arms.map((s) => parseArm(s, { model: opts.model }));
   // absolute: hooks run with cwd = the fixture copy, and XEND_STATE_DIR must not resolve relative to it
   const outDir = path.resolve(opts.out || path.join(__dirname, 'results', new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)));
   fs.mkdirSync(outDir, { recursive: true });
@@ -317,6 +370,20 @@ async function main() {
     for (const j of jobs) console.log('  ' + j.task.name + ' ' + j.arm.label + ' (' + j.arm.kind + ':' + j.arm.model + (j.arm.kind === 'xend' ? ':' + j.arm.mode : '') + ') #' + j.trial);
     if (Object.keys(opts.arm_env).length) console.log('arm-env (applied to xend-kind arms): ' + JSON.stringify(opts.arm_env));
     return;
+  }
+  if (opts.warmup) {
+    const warmTask = { name: 'warmup', dir: TASKS_DIR, prompt: 'Reply with the single word: ok', max_turns: 2, timeout_s: 180 };
+    // one at a time: the first warm-up writes the shared prefix, the rest read it
+    await pool(armSpecs, 1, async (arm) => {
+      const work = fs.mkdtempSync(path.join(workRoot, 'warmup-'));
+      const stateDir = path.join(outDir, 'state', 'warmup-' + arm.label);
+      fs.mkdirSync(stateDir, { recursive: true });
+      const r = await runClaude(warmTask, arm, opts, work, stateDir);
+      const u = (r.json && r.json.usage) || {};
+      const w = { arm: arm.label, cost_usd: (r.json && r.json.total_cost_usd) || 0, cache_creation: u.cache_creation_input_tokens || 0, cache_read: u.cache_read_input_tokens || 0, ok: !!(r.json && !r.json.is_error), ts: new Date().toISOString() };
+      fs.appendFileSync(path.join(outDir, 'warmup.jsonl'), JSON.stringify(w) + '\n');
+      console.log('warm-up ' + arm.label.padEnd(14) + ' cache_write=' + w.cache_creation + ' cache_read=' + w.cache_read + ' $' + w.cost_usd.toFixed(3) + (w.ok ? '' : ' FAILED'));
+    });
   }
   let done = 0;
   await pool(jobs, opts.concurrency, async (job) => {
@@ -338,4 +405,4 @@ async function main() {
 function claudeVersion() { try { return execFileSync('claude', ['--version'], { timeout: 10000 }).toString().trim(); } catch (_) { return 'unknown'; } }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, parseScore, splitCost, parseArmEnv };
+module.exports = { loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, normalizeArm, toolArgs, parseScore, splitCost, parseArmEnv, TOOLSETS };

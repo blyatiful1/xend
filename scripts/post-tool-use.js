@@ -41,8 +41,13 @@ function main() {
   io.writeHookOutput({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: result.output } });
 }
 
-function marker(note, fullPath) {
-  return '[xend] ' + note + (fullPath ? '. Full output: ' + fullPath : '');
+// The marker is the whole contract (docs/RESEARCH.md H15): it says what was removed, that what is
+// left is complete for decisions, and where the original is. The session block no longer explains
+// it, so a session in which nothing is condensed pays nothing for the explanation.
+const COMPLETE = 'Nothing decision-relevant was removed: treat this as complete and re-run only if state may have changed';
+
+function marker(note, fullPath, complete) {
+  return '[xend] ' + note + (complete ? '. ' + COMPLETE : '') + (fullPath ? '. Full output: ' + fullPath : '');
 }
 
 // If the model reads back a persisted original, log it: the recovery rate is the metric that
@@ -112,7 +117,7 @@ function handleBash(input, resp, sc, dir, id) {
     const head = (stdout || stderr).split('\n').slice(0, 10).join('\n');
     const total = shape.countLines(combined);
     const note = 'The remaining ' + io.fmtInt(Math.max(0, total - 10)) + ' lines are byte-identical to this command\'s output at your earlier call ' + hit.id + ' (the command\'s output is unchanged; other state may have changed)';
-    const newStdout = head + '\n' + marker(note, full);
+    const newStdout = head + '\n' + marker(note, full, false);
     const output = Object.assign({}, resp, { stdout: newStdout, stderr: '' });
     return { changed: true, output, before: combined.length, after: newStdout.length, kinds: ['dedupe'] };
   }
@@ -127,8 +132,8 @@ function handleBash(input, resp, sc, dir, id) {
   // Name a recovery path only when enough was removed to matter; a path invites a re-read.
   const full = savedChars >= 2000 ? (resp.persistedOutputPath || state.persistOriginal(dir, id, combined)) : null;
   const kinds = so.kinds.concat(se.kinds.map((k) => 'stderr:' + k));
-  const note = 'Condensed ' + shape.describe(so.kinds.length ? so.kinds : se.kinds, shape.countLines(stdout || stderr), shape.countLines(so.changed ? so.text : se.text)) + '. Errors, failures and summaries are kept in full' + (resp.persistedOutputPath ? '; the original was already cut by Claude Code at its output cap' : '');
-  const newStdout = so.text + (so.text.endsWith('\n') ? '' : '\n') + marker(note, full);
+  const note = 'Condensed ' + shape.describe(so.kinds.length ? so.kinds : se.kinds, shape.countLines(stdout || stderr), shape.countLines(so.changed ? so.text : se.text)) + '. Errors, failures, diffs and summaries are kept in full' + (resp.persistedOutputPath ? '; the original was already cut by Claude Code at its output cap' : '');
+  const newStdout = so.text + (so.text.endsWith('\n') ? '' : '\n') + marker(note, full, true);
   const output = Object.assign({}, resp, { stdout: newStdout, stderr: se.text });
   return { changed: true, output, before, after: newStdout.length + se.text.length, kinds };
 }
@@ -201,7 +206,7 @@ function handleMcp(input, resp, sc, dir, id) {
     const r = shapeMcpText(resp, sc);
     if (!r.changed || r.before - r.after < 300) return null;
     const full = state.persistOriginal(dir, id, resp);
-    const out = r.text + '\n' + marker('Condensed ' + shape.describe(r.kinds, shape.countLines(resp), shape.countLines(r.text)), full);
+    const out = r.text + '\n' + marker('Condensed ' + shape.describe(r.kinds, shape.countLines(resp), shape.countLines(r.text)), full, true);
     return { changed: true, output: out, before: resp.length, after: out.length, kinds: r.kinds };
   }
   if (Array.isArray(resp)) {
@@ -213,7 +218,7 @@ function handleMcp(input, resp, sc, dir, id) {
         if (r.changed && r.before - r.after >= 300) {
           changed = true; kinds.push.apply(kinds, r.kinds);
           const full = state.persistOriginal(dir, id + '-' + before, block.text);
-          return Object.assign({}, block, { text: r.text + '\n' + marker('Condensed ' + shape.describe(r.kinds, shape.countLines(block.text), shape.countLines(r.text)), full) });
+          return Object.assign({}, block, { text: r.text + '\n' + marker('Condensed ' + shape.describe(r.kinds, shape.countLines(block.text), shape.countLines(r.text)), full, true) });
         }
       }
       return block;
