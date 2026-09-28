@@ -42,6 +42,13 @@ changes `scripts/`, `hooks/`, `agents/` or `skills/` bumps it.
   (`./run_tests.sh`) as a real failure; only a runner missing from the machine is unverifiable.
 - `/xend:stats` finds transcripts under `CLAUDE_CONFIG_DIR` when it is set.
 
+### Docs
+
+- The README is rewritten around what a long day of Claude Code costs and how to make it cost
+  less: headline numbers, first commands, habits that save turns and cache, and what was tested
+  and left out. Every run moved to `docs/RESULTS.md` and the full rules to `docs/GUARANTEES.md`,
+  unchanged.
+
 ### Bench
 
 - `--arms-file` entries set their `env` on baseline arms too and can pass extra `claude`
