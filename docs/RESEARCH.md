@@ -43,8 +43,10 @@ environment are marked *(measured here)*.
 9. A plugin's own prefix is its first cost, and it was bigger than estimated: measured through a
    logging proxy, xend added ~1,400 cache-write tokens to every session (and Claude Code now
    writes the cache at 2x the input price). Cutting that to ~413 tokens and removing the "run the
-   tests" turn with a hook (H24) moved the short-task suite from +9.3% to about -1% against no
-   plugin at equal or better quality (runs r8, r10, r11; section 7b).
+   tests" turn with a hook (H24) made the release **9.1% cheaper than the previous one on short tasks
+   (95% CI -12.7% to -4.7%, all three gates PASS)**: against no plugin it went from +5.8% (gate
+   FAIL) to -1.2% (cost-neutral) with a higher pass rate. On long tasks both releases cost about 16%
+   less than no plugin at 100% of hidden tests (runs r8-r11, section 7b).
 
 ## 1. Where the tokens go
 
@@ -115,7 +117,7 @@ Each entry: **mechanism** → **xend implementation** → expected saving → ex
 
 **H15. The condensed-output contract prevents the rtk failure mode.** The model must know that a condensed result is complete, where the original is, and that re-running will not show more. *(observed here)*: a marker-only rewrite without explanation made Haiku spend its reply complaining about hooks. → Stable paragraph in the session block plus a self-explanatory marker on every shaped result. (Since r8 the paragraph is gone and the marker carries the whole contract: what was removed, that nothing decision-relevant was, that the rest is complete and re-running is for changed state only, and where the original is. A session in which nothing is condensed now pays nothing for the explanation.) → Grade A for the failure, C for the remedy. → Validation: turn deltas in the bench must not rise. → Status: shipped.
 
-**H16. Plugin overhead must be smaller than its savings, and on micro-tasks it is not.** Skill descriptions, agent descriptions and the session block are prefix cost paid once per session (cache write at 1.25x) and then re-read every turn (0.1x). *(measured here, run r2: 21 tasks x 2 trials, 4.5 turns on average)*: uncached input +12.7%, total tokens +6.4%, cost +9.0% (95% CI +6.1% to +11.9%) with the original ~1,250-token prefix, while quality rose 4.8 points and output tokens fell 3.2%. The shaping layer had nothing to condense on 20 of the 21 tasks. The prefix was then cut to ~765 tokens; run r3 measured cost +3.5% (interval including zero) with output tokens -8.6%. The conclusion stands regardless of the trim: on five-turn tasks a plugin cannot save money, because the only costs in play are the fixed prefix and a few hundred output tokens; xend's savings come from long sessions, reading-heavy work, and the native levers the bench does not exercise. → Grade A (own paired measurement). → Validation: bench by turn count; a long-session suite is the missing evidence. **Update (runs r8, r10, Claude Code 2.1.283):** the prefix was measured exactly for the first time, through a request-logging proxy and the bench's warm-up cache writes: the shipped plugin added **1,372-1,419 cache-write tokens per session** (session block 2,869 B, five agent descriptions, a routing skill; this text tokenizes at ~2.7 characters per token, not 4), and Claude Code now writes the cache at the 1-hour TTL, 2x the input price. Cutting it to **~413 tokens** (a 709 B block, two one-line builder descriptions, no routing skill) and adding the auto-test (H24) turned the same suite from **+9.3% (95% CI +4.9% to +14.0%, gate FAIL) for the previous build** to **-1.2% (CI -5.0% to +3.7%)** in the same run (r10), with pass rate +2.4 points, output tokens -12.4% and turns -0.3; a build with the cut prefix and the lean text still on measured -5.1% (CI -13.1% to +1.1%) in r8.
+**H16. Plugin overhead must be smaller than its savings, and on micro-tasks it is not.** Skill descriptions, agent descriptions and the session block are prefix cost paid once per session (cache write at 1.25x) and then re-read every turn (0.1x). *(measured here, run r2: 21 tasks x 2 trials, 4.5 turns on average)*: uncached input +12.7%, total tokens +6.4%, cost +9.0% (95% CI +6.1% to +11.9%) with the original ~1,250-token prefix, while quality rose 4.8 points and output tokens fell 3.2%. The shaping layer had nothing to condense on 20 of the 21 tasks. The prefix was then cut to ~765 tokens; run r3 measured cost +3.5% (interval including zero) with output tokens -8.6%. The conclusion stands regardless of the trim: on five-turn tasks a plugin cannot save money, because the only costs in play are the fixed prefix and a few hundred output tokens; xend's savings come from long sessions, reading-heavy work, and the native levers the bench does not exercise. → Grade A (own paired measurement). → Validation: bench by turn count; a long-session suite is the missing evidence. **Update (runs r8, r10, Claude Code 2.1.283):** the prefix was measured exactly for the first time, through a request-logging proxy and the bench's warm-up cache writes: the shipped plugin added **1,372-1,419 cache-write tokens per session** (session block 2,869 B, five agent descriptions, a routing skill; this text tokenizes at ~2.7 characters per token, not 4), and Claude Code now writes the cache at the 1-hour TTL, 2x the input price. Cutting it to **~413 tokens** (a 709 B block, two one-line builder descriptions, no routing skill) and adding the auto-test (H24) turned the same suite from **+9.3% (95% CI +4.9% to +14.0%, gate FAIL) for the previous build** to **-1.2% (CI -5.0% to +3.7%)** in the same run (r10), with pass rate +2.4 points, output tokens -12.4% and turns -0.3; a build with the cut prefix and the lean text still on measured -5.1% (CI -13.1% to +1.1%) in r8. Merged over r10 and r11 (84 paired runs, r11 on the exact shipped commit): **-1.2% (CI -4.4% to +3.1%), pass rate +4.8 points, output -11.6%, turns -0.2**; the previous build merged over r8 and r10: +5.8% (CI -1.2% to +11.4%), cost gate FAIL. On five-turn tasks the plugin is now cost-neutral instead of a cost; the savings claim for short tasks is against the previous release (-9.1%, CI -12.7% to -4.7%), not against no plugin.
 
 **H17. Subagents without memory files and at low effort.** `omitClaudeMd: true` and `effort: low` on scout and reader remove the memory prefix and the reasoning budget from cheap, mechanical work. → Grade C. → Status: shipped. **Correction** *(verified here, Claude Code 2.1.272)*: plugin agents do not honour `omitClaudeMd` at all, so this claim was wrong for `xend-scout` and `xend-reader` as shipped; see H23.
 
@@ -224,9 +226,10 @@ on three bugfix tasks the model answered from the attached `6 passed` note and f
 turns instead of four. Two refinements came from traced project runs: it never runs after `Write`
 (a file being created is half a feature), and a suite that cannot be collected yet (a module the
 tests import does not exist) produces no note, because the traced log-pipeline run spent output on
-acknowledging exactly that. → Saving: bench r8 isolates it (same build with and without it, 42
-paired runs each): turns 4.60 to 4.12 and cost -5.4 points against the no-auto-test arm; the bugfix
-tasks went from four turns to three. → Quality risk: the model trusts a partial result (the suite
+acknowledging exactly that. → Saving: bench r8 isolates it (the same build with and without it, 42
+paired runs each): **cost -5.5% (95% CI -9.7% to -2.0%), turns 4.6 to 4.1, output -8.9%, pass rate
+unchanged — PASS on all three gates**. The four bugfix tasks went from 4.0-4.2 turns (no plugin,
+previous release) to 3.0-3.1 (every run with it on, r8/r10/r11). → Quality risk: the model trusts a partial result (the suite
 xend chose, not the one the task names); every note names its command, and a pass on the wrong suite
 is the failure mode to watch for. → **Grade B** (own paired measurement, one environment). → Status:
 on in `balanced` and `aggressive`, off in `lite`.
@@ -349,6 +352,22 @@ power per run and are the next step for the suite.
 - The first job of a run triggers a one-off ~27k-token cache write outside the main loop
   (`modelUsage` minus `usage`), paid by whichever arm gets there first (r8: the no-plugin arm; r10: the
   final build). The warm-up now makes one tool call so that path is primed before timed jobs.
+
+Runs in this round (Sonnet 5; micro suite at low effort, project tasks at medium; local tool set,
+warm-up; `bench/results/r8-*` to `r11-*`, each with `config.json`, `warmup.jsonl` and `report.md`):
+
+| Run | Arms | What it showed |
+|---|---|---|
+| r8, 21 tasks x 2 | no plugin, previous release, cut prefix + auto-test (lean on), same without auto-test | previous +4.2%; cut prefix alone +0.4%; with auto-test -5.1% (CI -13.1% to +1.1%); auto-test alone -5.5% (CI -9.7% to -2.0%, all gates PASS); every lean-on arm failed `adv-middle-of-output` by leaving the value blank |
+| ablation, 1 task x 3 | lean on / lean off / terse off | lean on 1/3 (3/6 with terse off), lean off 3/3, no plugin 3/3: lean rules made opt-in |
+| r9, 3 project tasks x 2 | no plugin, previous release, cut prefix + auto-test (lean on) | all 100% of hidden tests; previous -7.1%, new -2.3%; the log-pipeline run traced to auto-test notes about modules not written yet (fixed: collection errors produce no note) |
+| r10, 21 tasks x 2 | no plugin, previous release, final candidate | previous **+9.3% (CI +4.9% to +14.0%), cost gate FAIL**; final -1.2% (CI -5.0% to +3.7%), pass +2.4 pp; final vs previous **-9.1% (CI -12.7% to -4.7%), all gates PASS** |
+| r10p, 3 project tasks x 2 | no plugin, previous release, shipped build | all 100%; previous -16.1% (PASS), shipped **-15.9% (CI -39.6% to -2.5%), all gates PASS**; shipped vs previous -0.2% (CI -11.1% to +13.5%) |
+| r11, 21 tasks x 2 | no plugin, shipped build | -1.2% (CI -4.2% to +2.6%), pass 90.5% to 97.6% (quality PASS), output -9.2%, turns -0.2 |
+
+Two task notes. `qa-parse-record-impact` fails in every arm most of the time (it lists a file the
+grader forbids); `adv-middle-of-output` fails whenever the model adds the variable with an empty
+value, which the no-plugin arm also did in r10 and r11, so the grader now says which case it saw.
 
 ## 8. Sources
 

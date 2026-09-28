@@ -1,0 +1,70 @@
+{
+  "opts": {
+    "arms": [
+      "baseline",
+      "xend"
+    ],
+    "runs": 3,
+    "model": "sonnet",
+    "effort": "low",
+    "tasks": "adv-middle-of-output",
+    "category": "",
+    "concurrency": 4,
+    "maxBudget": 2,
+    "tools": "",
+    "toolset": "local",
+    "warmup": true,
+    "armsFile": "/tmp/claude-0/-home-user-xend/d3bf5ebb-ed2b-5044-917b-5c25577a76f9/scratchpad/arms-amo.json",
+    "profile": "balanced",
+    "ponytail": "",
+    "ponytailText": "",
+    "ponytailStrict": false,
+    "armEnv": "",
+    "out": "/tmp/claude-0/-home-user-xend/d3bf5ebb-ed2b-5044-917b-5c25577a76f9/scratchpad/amo-ablation",
+    "keep": true,
+    "dryRun": false,
+    "list": false,
+    "extra": [],
+    "arm_env": {}
+  },
+  "arms": [
+    {
+      "label": "baseline",
+      "kind": "baseline",
+      "model": "sonnet",
+      "mode": "plain"
+    },
+    {
+      "label": "xend-new",
+      "kind": "xend",
+      "model": "sonnet",
+      "mode": "plain",
+      "pluginDir": "/tmp/claude-0/-home-user-xend/d3bf5ebb-ed2b-5044-917b-5c25577a76f9/scratchpad/xend-new"
+    },
+    {
+      "label": "new-nolean",
+      "kind": "xend",
+      "model": "sonnet",
+      "mode": "plain",
+      "pluginDir": "/tmp/claude-0/-home-user-xend/d3bf5ebb-ed2b-5044-917b-5c25577a76f9/scratchpad/xend-new",
+      "env": {
+        "XEND_PONYTAIL": "off"
+      }
+    },
+    {
+      "label": "new-noterse",
+      "kind": "xend",
+      "model": "sonnet",
+      "mode": "plain",
+      "pluginDir": "/tmp/claude-0/-home-user-xend/d3bf5ebb-ed2b-5044-917b-5c25577a76f9/scratchpad/xend-new",
+      "env": {
+        "XEND_TERSE": "off"
+      }
+    }
+  ],
+  "tasks": [
+    "adv-middle-of-output"
+  ],
+  "claude_version": "2.1.283 (Claude Code)",
+  "started": "2026-09-28T05:48:52.414Z"
+}

@@ -19,8 +19,8 @@ Any layer may set `"profile"` and override individual keys. Example `.xend.json`
 | Key | lite | balanced (default) | aggressive |
 |---|---|---|---|
 | `terse` | `lite` | `full` | `full` |
-| `ponytail` (lean build rules: ladder, root-cause fixes, no unrequested abstraction) | `lite` | `full` | `full` |
-| `ponytailText` (**`adapted` is xend's condensation; `upstream` is the upstream-verbatim text JetBrains measured, opt-in in every profile after bench r5 measured +16.7% cost on micro-tasks**) | `adapted` | `adapted` | `adapted` |
+| `ponytail` (lean build rules: ladder, root-cause fixes, no unrequested abstraction; opt-in since bench r8) | `off` | `off` | `off` |
+| `ponytailText` (used when `ponytail` is on: **`adapted` is xend's condensation; `upstream` is the upstream-verbatim text JetBrains measured**) | `adapted` | `adapted` | `adapted` |
 | `upstream.ponytail` (`auto` defers to an installed, injecting ponytail plugin; `yield` always defers; `ignore` never does) | `auto` | `auto` | `auto` |
 | `ponytailStrict` (drop every xend-authored bridging sentence so the ponytail portion is byte-identical to upstream's own hook output; for replication runs) | `false` | `false` | `false` |
 | `shape.maxChars` (head+tail beyond this, generic output kinds only; never diffs or test runs) | 30000 (native cap only) | 12000 | 8000 |
@@ -101,22 +101,23 @@ The level upstream would run at comes from `PONYTAIL_DEFAULT_MODE`, else
 is read as corroboration only: it survives an uninstall, and hook order within one SessionStart is
 not guaranteed, so it never makes a detection on its own.
 
-Ownership, and what the block looks like at `balanced`:
+Ownership, and what the block looks like at `balanced` (bytes; this text tokenizes at roughly 2.7
+characters per token):
 
 | Situation | xend's session block |
 |---|---|
-| nothing injecting, `ponytail: off` | 1,549 B / 408 tok — byte-identical to a build without this feature |
-| nothing injecting, adapted text | 2,578 B / 678 tok: the lean paragraph, the level line, and the bridging sentence |
-| nothing injecting, `ponytailText: upstream` | 7,056 B / 1,857 tok: the upstream-verbatim ruleset plus three ` [xend]` reconciliation tags |
-| same, with `ponytailStrict` | 6,803 B / 1,790 tok: the ponytail portion is byte-identical to upstream's own hook output |
-| upstream is injecting | 1,892 B / 498 tok — xend emits a short note instead of a second copy; upstream adds its own ~5,252 B / 1,382 tok |
-| upstream is installed with mode `off` | 1,549 B / 408 tok — xend injects nothing either; the user configured one source of truth |
+| nothing injecting, `ponytail: off` (the default in every profile since bench r8) | 709 B |
+| nothing injecting, `ponytail: full`, adapted text | 1,144 B: the lean paragraph with its level line |
+| nothing injecting, `ponytailText: upstream` | 6,216 B: the upstream-verbatim ruleset plus three ` [xend]` reconciliation tags and the bridging sentence |
+| same, with `ponytailStrict` | 5,963 B: the ponytail portion is byte-identical to upstream's own hook output |
+| upstream is injecting | 1,049 B — xend emits a short note instead of a second copy; upstream adds its own ~5,252 B / 1,382 tok |
+| upstream is installed with mode `off` | 709 B — xend injects nothing either; the user configured one source of truth |
 
 `upstream.ponytail` switches this: `auto` uses the detection above, `yield` always defers (for a
 channel xend cannot see, such as a Cursor rule or an enterprise-managed settings layer), and
 `ignore` behaves as if upstream were absent.
 
-No profile selects `ponytailText: upstream` by default. Setting it (config, `XEND_PONYTAIL_TEXT=upstream`, or `/xend:ponytail` with the session override) swaps xend's ~215-token adaptation for upstream's ~1,382-token verbatim text; bench run r5 measured that swap at +16.7% cost and +8.6% output tokens on five-turn tasks, so use it only where the JetBrains result applies: long, code-heavy sessions. `/xend:doctor` reports the active text as `text: adapted` or `text: upstream-verbatim (measured)`.
+No profile turns lean rules on by default any more. Bench r8 found xend's adapted text no cheaper on short tasks and behind a pass-rate drop on one adversarial task (the model left a required value blank; lean on 3 of 6 passes, lean off 3 of 3), and bench r5 measured the upstream-verbatim text at +16.7% cost and +8.6% output tokens on five-turn tasks. Turn them on with `/xend:ponytail full` or `XEND_PONYTAIL=full`; add `XEND_PONYTAIL_TEXT=upstream` for the text JetBrains measured, and use that where their result applies: long, code-heavy sessions. `/xend:doctor` reports the active text as `text: adapted` or `text: upstream-verbatim (measured)`.
 
 xend ships **no** `SubagentStart` hook and does not port upstream's: it would add ~1,382 tokens to
 every subagent call, including the Haiku builders whose whole purpose is to be cheap. If an upstream install has one, `/xend:doctor` reports it; there is no xend-side remedy.

@@ -59,15 +59,35 @@ Lean build rules and architect mode are opt-in in every profile (`/xend:ponytail
 
 ## What to expect
 
-Honest numbers beat advertised ones. Independent measurements of the techniques xend combines:
+Measured with the paired bench (Claude Sonnet 5; the 21 short tasks at low effort, the three project tasks at medium effort; each run pairs the same tasks across arms; `bench/results/r8-*` to `r11-*`, details in `docs/RESEARCH.md` section 7b):
+
+| Comparison | Paired runs | Pass rate | Output tokens | Turns | Cost per task |
+|---|---|---|---|---|---|
+| this release vs the previous one, short tasks (r10) | 42 | 92.9% -> 95.2% | -12.1% | 4.6 -> 4.2 | **-9.1%** (95% CI -12.7% to -4.7%), all three gates PASS |
+| this release vs no plugin, short tasks (r10 + r11) | 84 | 91.7% -> 96.4% | -11.6% | 4.5 -> 4.2 | -1.2% (95% CI -4.4% to +3.1%) |
+| previous release vs no plugin, short tasks (r8 + r10) | 84 | 94.0% -> 90.5% | -4.1% | 4.6 -> 4.5 | +5.8% (95% CI -1.2% to +11.4%), cost gate FAIL |
+| this release vs no plugin, project tasks (r10p) | 6 | 100% of hidden tests in both | -4.7% | 25.0 -> 22.0 | **-15.9%** (95% CI -39.6% to -2.5%), all three gates PASS |
+| this release vs the previous one, project tasks (r10p) | 6 | 100% in both | +2.7% | 21.2 -> 22.0 | -0.2% (95% CI -11.1% to +13.5%) |
+
+What changed, and what each part is worth:
+
+- **The plugin's own footprint was the first cost.** Measured through a request-logging proxy, the previous release added ~1,400 cache-write tokens to every session, and Claude Code now writes the cache at the 1-hour rate (2x the input price). This release adds ~413. On its own that took the short-task suite from +4.2% to +0.4% against no plugin (r8).
+- **The turn is the unit of cost on short tasks.** After an `Edit`, xend runs the project's quick tests and hands the result over with the edit, so the model does not spend a turn running them. Measured alone on the same build: **-5.5% cost (95% CI -9.7% to -2.0%), turns -0.5, pass rate unchanged, all three gates PASS** (r8). Bugfix tasks went from four turns to three. Asking the model to batch the edit and the test itself did not work (Sonnet kept them in separate turns in every traced run), so a hook does it.
+- **Lean rules are opt-in now.** xend's adapted ponytail text bought no measurable saving and made the model leave a required value blank on one adversarial task (lean on passed 3 of 6, lean off 3 of 3), which by this project's own pre-registered rule turns a feature off.
+
+So on short tasks this release is cost-neutral against no plugin, with a higher pass rate and fewer output tokens; the confident saving there is against the previous release. On long tasks (a 50-module brownfield change and two greenfield packages) both releases cost about 16% less than no plugin at 100% of hidden tests, and they cannot be told apart. The levers the bench cannot see (cache TTL across pauses, MCP output caps, compaction avoidance through checkpoints and `/clear`) come on top through `/xend:setup` and `/xend:doctor`.
+
+Independent measurements of the techniques xend combines:
 
 - Terse output style: 8.5% fewer output tokens on 86 real coding tasks, no detectable quality change (JetBrains, paired A/B). Output is a minority of agentic spend, so expect a few percent of total cost from this layer alone; much more in chat-style Q&A.
 - Command-rewriting filters (rtk): **+7.6% cost** and more turns in the same harness. This is the failure mode xend's marker contract and recoverability rules are designed against.
 - Masking old tool results: 52% cheaper with a slightly higher solve rate on SWE-bench Verified (JetBrains Research). xend enables Anthropic's server-side version in the `aggressive` profile.
-- Prompt caching: the fixed prefix measured here was 32,062 tokens per request; cache reads cost a tenth of a miss. Nothing xend injects varies between turns.
-- The ponytail ruleset: **-10.3% cost (p = 0.004)**, -15.4% code (p = 0.088, against an advertised -54%), -11% time, and no significant quality difference across 80 paired tasks (JetBrains; 251 trials, $246.09). The load-bearing finding is about *delivery*, not content: "If you copy the SKILL.md into a skills folder and let the model decide when to use it, it will self-activate zero times." That is why xend injects it from the SessionStart hook. **Two honest caveats:** only the cost figure is statistically solid — the code figure is not — and the text xend injects by default on `lite` and `balanced` is xend's own 240-token condensation, **not** the ~1,382-token artifact those numbers describe; this text is xend's adaptation and is untested. Set `XEND_PONYTAIL_TEXT=upstream` (the default on `aggressive`) to run the measured text — that text is upstream-verbatim (the measured artifact).
+- Prompt caching: cache reads cost a tenth of the input price, and Claude Code writes the cache at the 1-hour rate (2x). Nothing xend injects varies between turns, so its ~413 tokens are written once per session and then read at a tenth.
+- The ponytail ruleset: **-10.3% cost (p = 0.004)**, -15.4% code (p = 0.088, against an advertised -54%), -11% time, and no significant quality difference across 80 paired tasks (JetBrains; 251 trials, $246.09), measured with the ~1,382-token upstream text injected at SessionStart on longer tasks. xend's own runs never reproduced a saving on short tasks with either text (r4, r5, r8), so lean rules are opt-in: `/xend:ponytail full` for xend's short adapted text, `XEND_PONYTAIL_TEXT=upstream` for the measured one.
 
-xend's own paired runs (Claude Sonnet 5 at low effort, same tasks under both arms; `bench/results/`):
+### Earlier runs
+
+Before r8 the bench ran with the hosting session's tool set and without a warm-up, so the percentages below are relative to a heavier base than a local session has (`docs/RESEARCH.md` H25); they remain valid as paired comparisons of the builds of the time (Claude Sonnet 5, low effort):
 
 | Run | Tasks x trials | Pass rate (baseline -> xend) | Output tokens | Turns | Cost per task |
 |---|---|---|---|---|---|
@@ -78,11 +98,7 @@ xend's own paired runs (Claude Sonnet 5 at low effort, same tasks under both arm
 | r4, ponytail on (xend's adapted text, the shipped `balanced` default) | 21 x 1 | 90.5% -> 90.5% (same two tasks fail in both arms) | -4.9% | 4.3 -> 4.5 | +3.9% (95% CI -4.5% to +10.0%) |
 | r5, ponytail on (upstream-verbatim text, opt-in) | 21 x 1 | 95.2% -> 90.5% (the flaky adversarial task again) | **+8.6%** | 4.5 -> 5.0 | **+16.7%** (95% CI +10.6% to +24.0%) |
 
-On these micro-tasks ponytail does not reproduce the JetBrains saving: the tasks write too little code for a "write less code" rule to remove any, so only the rule's prefix shows up. The adapted text (about 215 tokens) is within noise of no ponytail at all (r3 vs r4); the upstream-verbatim text (about 1,400 tokens) costs 17% more and makes the model write longer replies and take more turns. The JetBrains result came from larger SkillsBench tasks. Hence the shipped default is the adapted text in every profile, and the upstream text is opt-in for people who want the measured artifact on long, code-heavy work.
-
-Read r2 carefully, because it is the kind of number this project exists to surface. Quality was never worse on any task and improved on two. But these tasks average 4.5 turns, the plugin's fixed prefix (session block plus skill and agent descriptions) is cache-written once per session and not amortized over so few turns, and the shaping layer had something to condense on one task out of 21. The gate therefore returns **FAIL on cost** for micro-tasks, exactly as rtk's independent benchmark did for rtk. Where xend does win is longer and reading-heavier work: in r1 the log-analysis task went from 8 turns and 455k tokens to 4 turns and 206k, and the navigation task in r2 used 23% fewer tokens with one turn less. After r2 the prefix was cut by roughly 40%; r3 shows the overhead more than halved (+3.5%, interval including zero) with output tokens down 8.6% and turns down. The levers the bench cannot see at all (cache TTL across pauses, MCP output caps, compaction avoidance through checkpoints and `/clear`, deferred tool schemas) are applied through `/xend:setup` and `/xend:doctor`.
-
-The practical guidance that follows from the data: install xend for sessions that read a lot or run long, use `/xend:doctor` and `/xend:setup` for the native levers, and do not expect savings on five-turn micro-tasks. A 21-task suite cannot certify a 3-point quality bound (it detects roughly an 8-point drop); the bench reports its minimum detectable effect and merges evidence across runs. See `bench/README.md`.
+These runs are why this release exists: on five-turn tasks the plugin's fixed prefix cost more than terse output saved, and the ponytail texts did not reproduce the JetBrains saving on tasks that write little code.
 
 ### Architect mode on long tasks
 

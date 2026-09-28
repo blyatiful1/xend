@@ -36,7 +36,7 @@ no database, and no dependency beyond Node.js 18+.
 |---|---|---|---|
 | L0 Measure | Know where tokens go before and after | `scripts/stats.js` (session JSONL), `scripts/doctor.js` (static audit), `bench/` (paired A/B) | all |
 | L1 Say less | Terse output style; caveman-compatible levels | SessionStart `additionalContext` (once per session, cache-stable) + `/xend:terse` skill | lite: `lite`, balanced: `full` |
-| L1b Build less | Lazy-solution ladder: YAGNI, reuse, stdlib, native, one line; root-cause bug fixes | SessionStart `additionalContext` after upstream detection + `/xend:ponytail` | lite: `lite`, balanced and aggressive: `full`, all with the adapted text; the upstream-verbatim text is opt-in |
+| L1b Build less | Lazy-solution ladder: YAGNI, reuse, stdlib, native, one line; root-cause bug fixes | SessionStart `additionalContext` after upstream detection + `/xend:ponytail` | off in every profile since bench r8 (opt-in: `/xend:ponytail full`); the upstream-verbatim text is a further opt-in |
 | L2 Read less | Lossless-recoverable shaping of tool results | PostToolUse `updatedToolOutput` on Bash, Read, Grep, Glob, MCP tools | balanced |
 | L3 Delegate cheaply | Haiku/Sonnet builders for architect mode; scout, reader and reviewer are opt-in extras | `agents/*.md` (builders), `extras/agents/*.md` (copy to use) | builders listed in every profile; extras off |
 | L4 Keep context lean | Checkpoints around `/clear` and compaction; turn-economy work rule | PreCompact hook, SessionStart(`compact|clear`), `/xend:checkpoint` | balanced |
@@ -50,7 +50,7 @@ no database, and no dependency beyond Node.js 18+.
 | Profile | What is on | Expected saving | Quality risk |
 |---|---|---|---|
 | `lite` | L0, L1 (`lite` terse), L2 noise-only (ANSI, progress bars, blank runs, trailing whitespace), Bash repeat shortening | a few percent | not measured separately |
-| `balanced` (default) | lite + L1 `full`, L2 structured shaping (test-runner and install noise, head+tail on long *generic* output only, grep/glob caps with true totals), L3, L4, L4b auto-test | 0-10% on short tasks, more on reading-heavy and long sessions | low; every transform is recoverable and diffs/tests/reads are never cut |
+| `balanced` (default) | lite + L1 `full`, L2 structured shaping (test-runner and install noise, head+tail on long *generic* output only, grep/glob caps with true totals), L3, L4, L4b auto-test | measured: cost-neutral on short tasks against no plugin (-9% against the previous release), about -16% on long project tasks | low; every transform is recoverable and diffs/tests/reads are never cut |
 | `aggressive` | balanced + tighter caps, ranged reads of very large files (PreToolUse), L6 server-side masking, L5 recommendations applied | larger on long sessions; can be negative on short ones | medium; must pass the bench gate before adoption |
 
 Profile resolution order: `XEND_PROFILE` env > `.xend.json` in the project (walking up) > `~/.config/xend/config.json` > `balanced`.
@@ -89,9 +89,10 @@ One stable block (no timestamps, no per-turn re-injection so the prompt cache st
 byte of it is paid in every session: Claude Code 2.1.283 writes the prompt cache at the 1-hour TTL
 (2x the input price), and the block is re-read at 0.1x on every later turn. On a four-turn task
 that is about 2.4x the input price per token before the model has done anything, which is why the
-block was cut from **2,869 B** (plus five agent descriptions and a routing skill, ~950 tokens of
-plugin prefix in all, measured through a request-logging proxy) to about **1,000 B** at
-`balanced` with the adapted lean text. Contents, in order:
+block was cut from **2,869 B** (plus five agent descriptions and a routing skill: ~1,400
+cache-write tokens of plugin prefix per session, measured through a request-logging proxy and the
+bench warm-up) to **709 B** at `balanced` (~413 cache-write tokens per session including the two
+builder descriptions). Contents, in order:
 
 - a one-line header naming the profile, terse level and lean level;
 - the terse rules for the active level, with the one exemption that matters (normal prose for
@@ -99,7 +100,8 @@ plugin prefix in all, measured through a request-logging proxy) to about **1,000
 - the work rule: few turns, independent tool calls in one message, open the files a task names
   directly, never re-read a file to confirm an edit or re-read an unchanged file, quiet test flags.
   The previous rule told the model to verify every edit with a read-back or diff, which cost a turn;
-- the lean rules (the ladder, root-cause fixes, no unrequested abstraction) in one short paragraph;
+- only when lean rules are on (opt-in since bench r8): the ladder, root-cause fixes, no unrequested
+  abstraction, in one short paragraph;
 - only when architect mode is on: the architect paragraph.
 
 What is **not** in it any more: the condensed-output contract (each `[xend]` marker now says it
