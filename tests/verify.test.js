@@ -422,6 +422,15 @@ test('runVerify: expands globs as bash does (matches sorted, no match left liter
   assert.equal(r.stdout.trim(), 'tests/test_a.py,tests/test_b.py,tests/none_*.py,tests/q*.py');
 });
 
+test('runVerify: notRunnable only when xend could not start the command, not when it ran and exited 127; a bad glob never throws', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-rv-nr-'));
+  assert.equal(verify.runVerify('definitely-not-a-real-program-xend', d, 5000).notRunnable, true);
+  const ran = verify.runVerify('node -e "process.exit(127)"', d, 5000);
+  assert.equal(ran.exit, 127);
+  assert.equal(ran.notRunnable, undefined);
+  assert.doesNotThrow(() => verify.runVerify("node -e '1' []] [a", d, 5000));
+});
+
 test('runVerify: runs without a shell; a missing program is exit 127, a shell-looking command is never run', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-rv-'));
   const missing = verify.runVerify('definitely-not-a-real-program-xend --x', d, 5000);
@@ -926,6 +935,28 @@ test('e2e: with no allow rule, no trust and no bypass, a builder\'s check is not
     // bypassPermissions mode: Claude Code would run it without asking, so xend does too
     runHook(SUBAGENT_STOP, Object.assign({}, input, { permission_mode: 'bypassPermissions' }), untrusted);
     assert.equal(fs.existsSync(path.join(cwd, 'SENTINEL')), true);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(stateBase, { recursive: true, force: true });
+  }
+});
+
+test('e2e: a check that runs and exits 127 itself is a mismatch (blocked), not "could not run"', () => {
+  const { cwd, stateBase } = setupProject();
+  try {
+    const dir = stateDirFor(stateBase, 'sess-127');
+    writeFileDeep(path.join(cwd, 'tests', 'missing-tool.test.js'), 'process.exit(127);\n');
+    const t = sentinelTask(cwd, 'T1');
+    t.verify = 'node tests/missing-tool.test.js';
+    writeSessionSetup(dir, [t]);
+    const res = runHook(SUBAGENT_STOP, {
+      session_id: 'sess-127', cwd, agent_id: 'agent-127', agent_type: 'xend:xend-worker',
+      last_assistant_message: passReplyTextWithTask('T1', 'echo unused'), stop_hook_active: false,
+    }, { XEND_STATE_DIR: stateBase });
+    assert.equal(JSON.parse(res.stdout).decision, 'block');
+    const rec = JSON.parse(fs.readFileSync(path.join(dir, 'verify.jsonl'), 'utf8').trim().split('\n').pop());
+    assert.equal(rec.verdict, 'mismatch');
+    assert.equal(rec.exit, 127);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(stateBase, { recursive: true, force: true });

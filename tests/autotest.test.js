@@ -254,3 +254,12 @@ test('permissions: the suggested rule never approves a bare interpreter', () => 
   assert.strictEqual(permissions.suggestRule('python3 -c "import mypkg"'), 'Bash(python3 -c "import mypkg")');
   assert.strictEqual(permissions.suggestRule('bash tests/run_test.sh'), 'Bash(bash tests/run_test.sh)');
 });
+
+test('permissions: without CLAUDE_PROJECT_DIR the outermost git repo is the project; a nested clone cannot approve itself', () => {
+  const permissions = require('../scripts/lib/permissions.js');
+  const d = tmp({ '.git/HEAD': 'ref: refs/heads/main\n', 'vendor/evil/.git/HEAD': 'ref: refs/heads/main\n',
+    'vendor/evil/.claude/settings.json': JSON.stringify({ permissions: { allow: ['Bash(npm test:*)'] } }) });
+  delete process.env.CLAUDE_PROJECT_DIR;
+  assert.strictEqual(permissions.projectRoot(path.join(d, 'vendor', 'evil')), d);
+  assert.strictEqual(permissions.check('npm test', { cwd: path.join(d, 'vendor', 'evil') }).ok, false);
+});

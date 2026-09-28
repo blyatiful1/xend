@@ -115,6 +115,19 @@ function persistOriginal(dir, toolUseId, text) {
 function pruneOld(env, maxAgeDays) {
   const root = baseDir(env);
   const cutoff = Date.now() - (maxAgeDays || 7) * 86400000;
+  let pruned = 0;
+  // pointers are also written under the per-user temp base (writeSessionPointers)
+  for (const r of pointerRoots(env)) {
+    if (r === root) continue;
+    for (const sub of ['by-session', 'by-cwd']) {
+      try {
+        for (const f of fs.readdirSync(path.join(r, sub)).slice(0, 2000)) {
+          const fp = path.join(r, sub, f);
+          if (fs.statSync(fp).mtimeMs < cutoff) { fs.rmSync(fp, { force: true }); pruned++; }
+        }
+      } catch (_) {}
+    }
+  }
   let entries = [];
   try { entries = fs.readdirSync(root); } catch (_) { return 0; }
   let removed = 0;
@@ -132,7 +145,7 @@ function pruneOld(env, maxAgeDays) {
       if (st.isDirectory() && st.mtimeMs < cutoff) { fs.rmSync(p, { recursive: true, force: true }); removed++; }
     } catch (_) {}
   }
-  return removed;
+  return removed + pruned;
 }
 
 // Pointers so the CLI (running outside the hook's stdin, e.g. from a skill or a user shell) can

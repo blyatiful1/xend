@@ -223,6 +223,12 @@ function projectLayer(json) {
 const AUTOTEST_TIMEOUT_CAP_MS = 25000;
 const VERIFY_TIMEOUT_CAP_MS = 170000;
 
+// Only the three profiles themselves: a name such as "toString" or "__proto__" from a config file is
+// not a profile.
+function isProfile(name) {
+  return typeof name === 'string' && Object.prototype.hasOwnProperty.call(PROFILES, name);
+}
+
 // Layered config. Each layer may set "profile" (switches the base defaults) and any override keys.
 function resolve(opts) {
   opts = opts || {};
@@ -239,11 +245,11 @@ function resolve(opts) {
     layers.push(safe.json); sources.push(proj.file); ignored = safe.ignored;
   }
   const envLayer = envOverrides(env);
-  if (env.XEND_PROFILE && PROFILES[env.XEND_PROFILE]) envLayer.profile = env.XEND_PROFILE;
+  if (env.XEND_PROFILE && isProfile(env.XEND_PROFILE)) envLayer.profile = env.XEND_PROFILE;
   if (Object.keys(envLayer).length) { layers.push(envLayer); sources.push('env'); }
 
   let profileName = 'balanced';
-  for (const l of layers) if (l && PROFILES[l.profile]) profileName = l.profile;
+  for (const l of layers) if (l && isProfile(l.profile)) profileName = l.profile;
   // a deep copy: deepMerge shares nested objects no layer overrides, and the lines below assign
   // into cfg.autoTest and cfg.architect, which must never write through to PROFILES
   let cfg = JSON.parse(JSON.stringify(PROFILES[profileName]));
@@ -268,7 +274,7 @@ function resolve(opts) {
   // only turn it off. Only a literal true counts.
   if (isObject(cfg.autoTest)) {
     let own = PROFILES.balanced.autoTest.enabled;
-    for (const l of [user, envLayer]) if (l && PROFILES[l.profile]) own = PROFILES[l.profile].autoTest.enabled;
+    for (const l of [user, envLayer]) if (l && isProfile(l.profile)) own = PROFILES[l.profile].autoTest.enabled;
     for (const l of [user, envLayer]) if (l && isObject(l.autoTest) && 'enabled' in l.autoTest) own = l.autoTest.enabled === true;
     cfg.autoTest.enabled = own === true && cfg.autoTest.enabled === true;
   }

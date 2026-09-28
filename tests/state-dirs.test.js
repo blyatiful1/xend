@@ -111,3 +111,17 @@ test('a configured XEND_STATE_DIR keeps its own mode; only xend\'s session dirs 
   assert.equal(fs.statSync(shared).mode & 0o7777, 0o1777);
   assert.equal(fs.statSync(path.join(shared, 'sess-mode')).mode & 0o777, 0o700);
 });
+
+test('pruneOld also prunes old pointers under the per-user temp base', () => {
+  const state = require('../scripts/lib/state.js');
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-sd-data-'));
+  const env = { CLAUDE_PLUGIN_DATA: data };
+  const tmpRoot = state.tmpBase();
+  const f = path.join(tmpRoot, 'by-session', 'xend-prune-test-' + process.pid + '.json');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, '{}');
+  const old = (Date.now() - 30 * 86400000) / 1000;
+  fs.utimesSync(f, old, old);
+  state.pruneOld(env, 7);
+  assert.equal(fs.existsSync(f), false);
+});

@@ -23,6 +23,7 @@ function hook(script, input, env) {
     XEND_STATE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-hk-state-')),
     XDG_CONFIG_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-hk-xdg-')),
     CLAUDE_CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-hk-home-')),
+    HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-hk-realhome-')), // ~/.claude deny rules count too
   }, env);
   delete childEnv.NODE_TEST_CONTEXT;
   delete childEnv.CLAUDE_PROJECT_DIR;

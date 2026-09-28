@@ -361,18 +361,23 @@ function capBuffer(buf, max) {
 }
 
 // Runs a command without a shell (argv from parseCommand, globs expanded as bash would), output
-// capped at 64 KB each. On Windows, npm, pnpm, yarn and the tools npm installs (tsc, eslint) are
+// capped at 64 KB each. notRunnable is set only when xend itself could not start the command
+// (refused, a missing program): a command that ran and exited 126 or 127 is an ordinary failure. On Windows, npm, pnpm, yarn and the tools npm installs (tsc, eslint) are
 // .cmd shims, which only run through cmd.exe; those get a shell, and only when every word is
 // plain. A missing program reports exit 127, as a shell would. Never throws.
 function runVerify(cmd, cwd, timeoutMs) {
   const start = Date.now();
   const parsed = parseCommand(cmd);
-  if (!parsed) return { exit: 126, stdout: '', stderr: 'xend: not a runnable command: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
+  if (!parsed) return { exit: 126, notRunnable: true, stdout: '', stderr: 'xend: not a runnable command: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
   const argv = [];
-  parsed.forEach((a, i) => { if (parsed.globs[i] && pathSafe(a)) argv.push(...expandGlob(a, cwd || process.cwd())); else argv.push(a); });
+  parsed.forEach((a, i) => {
+    let words = [a];
+    if (parsed.globs[i] && pathSafe(a)) { try { words = expandGlob(a, cwd || process.cwd()); } catch (_) { words = [a]; } }
+    argv.push(...words);
+  });
   const winShim = process.platform === 'win32' && /^(npm|pnpm|yarn|npx|tsc|eslint)$/i.test(argv[0]);
   if (winShim && !argv.every((a) => /^[\w.:/@,+=*-]+$/.test(a))) {
-    return { exit: 126, stdout: '', stderr: 'xend: not a runnable command on Windows: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
+    return { exit: 126, notRunnable: true, stdout: '', stderr: 'xend: not a runnable command on Windows: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
   }
   let res;
   try {
@@ -383,7 +388,7 @@ function runVerify(cmd, cwd, timeoutMs) {
   }
   const ms = Date.now() - start;
   if (res.error && res.error.code === 'ENOENT') {
-    return { exit: 127, stdout: '', stderr: argv[0] + ': command not found', ms, timedOut: false };
+    return { exit: 127, notRunnable: true, stdout: '', stderr: argv[0] + ': command not found', ms, timedOut: false };
   }
   const timedOut = !!(res.error && (res.error.code === 'ETIMEDOUT' || res.signal === 'SIGTERM'));
   let exit = res.status;

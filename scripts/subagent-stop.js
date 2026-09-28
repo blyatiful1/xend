@@ -113,9 +113,10 @@ function main() {
           const timeout = Math.min(arch.verifyTimeoutMs || 120000, VERIFY_TIMEOUT_CAP_MS);
           const run = verify.runVerify(command, cwd, timeout);
           exit = run.exit; ms = run.ms; stdout = run.stdout; stderr = run.stderr;
-          // 126/127: the command could not be run here at all (a runner missing on this machine, a
-          // Windows shim): that verifies nothing either way, so it is not a mismatch to block on
-          if (exit === 126 || exit === 127) { allowed = false; skipped = 'not-runnable'; exit = null; }
+          // xend could not start it here (a runner missing on this machine, a Windows shim): that
+          // verifies nothing either way, so it is not a mismatch to block on. A command that ran and
+          // exited 126/127 itself (npm's script calling a missing tool) stays an ordinary failure.
+          if (run.notRunnable) { allowed = false; skipped = 'not-runnable'; }
         }
       }
     }

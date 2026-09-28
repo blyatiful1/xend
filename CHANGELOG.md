@@ -33,7 +33,9 @@ changes `scripts/`, `hooks/`, `agents/` or `skills/` bumps it.
   runs, never from the model-writable session cache.
 - Commands run without a shell (globs expanded as bash would), and must pass an allowlist of
   runners and flags with project-relative paths: a verify line like `pytest --basetemp=$HOME` or
-  `npm test\ntouch x` is refused, `ruff` may only check and `tsc` needs `--noEmit`. A command that
+  `npm test\ntouch x` is refused, `ruff` may only check, `tsc` needs `--noEmit`, npm/pnpm/yarn may
+  run only the `test` script (so `npm run test:unit` is recorded as unverifiable, not re-run), and
+  make only its `test` or `check` target. A command that
   cannot run on the machine (exit 126 or 127) is recorded as unverifiable, not as a failure.
 - A repository's `.xend.json` can no longer turn the auto-test on (by any value, or by choosing
   a profile), choose its command, trust it, or stretch its timeouts. Timeouts are capped below the

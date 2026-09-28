@@ -36,11 +36,19 @@ function userDir(env) {
   return env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 }
 
+// Claude Code sets CLAUDE_PROJECT_DIR for every hook. Without it (a CLI run, a test), the project is
+// taken to be the outermost git repository around cwd, not the nearest: a vendored or cloned repo
+// with its own .git inside the project must not become the root whose allow rules count.
 function projectRoot(cwd, env) {
   env = env || process.env;
   if (env.CLAUDE_PROJECT_DIR) return path.resolve(env.CLAUDE_PROJECT_DIR);
   const start = path.resolve(cwd || process.cwd());
-  return settings.findGitRoot(start) || start;
+  let root = null;
+  for (let d = settings.findGitRoot(start); d; d = settings.findGitRoot(path.dirname(d))) {
+    root = d;
+    if (path.dirname(d) === d) break;
+  }
+  return root || start;
 }
 
 // Every settings file that can carry permission rules, most authoritative first. `allow: false`

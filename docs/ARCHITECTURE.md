@@ -252,7 +252,9 @@ model. Steps:
    reply. A missing `Result` or `Verification` is `malformed`. The plan task's own `verify` command
    is the contract and overrides whatever the builder wrote. The command is checked against a
    fixed allowlist of test/lint/typecheck runners (`pytest`, `npm test`, `go test`, `cargo test`,
-   `tsc`, `eslint`, …), a forbidden-character set (`; & | < > `` $ \ % ^`, newlines), an
+   `tsc --noEmit`, `ruff check`, `eslint`, …; npm/pnpm/yarn only the `test` script, make only
+   `test`/`check`, since the default actions of `tsc` and `ruff format` write files), a
+   forbidden-character set (`; & | < > `` $ \ % ^`, newlines), an
    allowlist of flags (so no `--basetemp`, `-c`, `-o`, `--junitxml`, `-exec`, `--require`, `--fix`),
    and a path check (no absolute, `~` or `..` paths). It then goes through the same permission
    check as the auto-test (L4b step 2): it runs only if Claude Code would run it without asking;

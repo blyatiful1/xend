@@ -220,3 +220,12 @@ test('session state dir, overrides, and pruning', () => {
   assert.ok(!fs.existsSync(old));
   assert.ok(fs.existsSync(dir));
 });
+
+test('a profile name inherited from Object.prototype is not a profile (and does not throw)', () => withUserConfig(null, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-cfg-'));
+  for (const name of ['toString', 'constructor', '__proto__', 'valueOf']) {
+    fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({ profile: name }));
+    assert.strictEqual(config.resolve({ env: {}, cwd: dir }).profile, 'balanced', name);
+  }
+  assert.strictEqual(config.resolve({ env: { XEND_PROFILE: 'hasOwnProperty' }, cwd: os.tmpdir() }).profile, 'balanced');
+}));
