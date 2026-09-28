@@ -38,8 +38,9 @@ no database, and no dependency beyond Node.js 18+.
 | L1 Say less | Terse output style; caveman-compatible levels | SessionStart `additionalContext` (once per session, cache-stable) + `/xend:terse` skill | lite: `lite`, balanced: `full` |
 | L1b Build less | Lazy-solution ladder: YAGNI, reuse, stdlib, native, one line; root-cause bug fixes | SessionStart `additionalContext` after upstream detection + `/xend:ponytail` | lite: `lite`, balanced and aggressive: `full`, all with the adapted text; the upstream-verbatim text is opt-in |
 | L2 Read less | Lossless-recoverable shaping of tool results | PostToolUse `updatedToolOutput` on Bash, Read, Grep, Glob, MCP tools | balanced |
-| L3 Delegate cheaply | Haiku/Sonnet subagents with a verify-or-escalate contract | `agents/*.md` with `model:` frontmatter + `/xend:route` skill | balanced |
-| L4 Keep context lean | Checkpoints around `/clear` and compaction; reading discipline | PreCompact hook, SessionStart(`compact|clear`), `/xend:checkpoint` | balanced |
+| L3 Delegate cheaply | Haiku/Sonnet builders for architect mode; scout, reader and reviewer are opt-in extras | `agents/*.md` (builders), `extras/agents/*.md` (copy to use) | builders listed in every profile; extras off |
+| L4 Keep context lean | Checkpoints around `/clear` and compaction; turn-economy work rule | PreCompact hook, SessionStart(`compact|clear`), `/xend:checkpoint` | balanced |
+| L4b Save turns | Run the project's quick tests after an Edit and attach the result, so the model does not spend a turn running them | PostToolUse(`Edit|MultiEdit`) `additionalContext` (`scripts/record-edit.js`, `scripts/lib/autotest.js`) | balanced, aggressive |
 | L5 Native levers | Effort, auto-compact window, bash output cap, prompt-cache TTL, tool search, MCP output cap | `/xend:setup <profile>` writes `settings.json` keys (with backup) | opt-in |
 | L6 Server-side masking | Anthropic context editing (`clear_tool_uses`) enabled through `CLAUDE_CODE_EXTRA_BODY` | settings `env` written by `/xend:setup` | aggressive (experimental; strongest external evidence, but each pass re-caches the remaining context) |
 | L7 Plan, then build | Keep file contents out of the main model's context entirely: it plans, disposable Haiku/Sonnet subagents read and write, a deterministic hook verifies their claims before the plan advances | SessionStart block (architect paragraph), PreToolUse gate (`pre-edit-gate.js`), PostToolUse(Agent) launch registry (`agent-launch.js`), SubagentStop verifier (`subagent-stop.js`), `xend-cli.js plan` | opt-in in every profile (bench r6/r7: not cheaper on greenfield project tasks) |
@@ -49,7 +50,7 @@ no database, and no dependency beyond Node.js 18+.
 | Profile | What is on | Expected saving | Quality risk |
 |---|---|---|---|
 | `lite` | L0, L1 (`lite` terse), L2 noise-only (ANSI, progress bars, blank runs, trailing whitespace), Bash repeat shortening | a few percent | not measured separately |
-| `balanced` (default) | lite + L1 `full`, L2 structured shaping (test-runner and install noise, head+tail on long *generic* output only, grep/glob caps with true totals), L3, L4 | 0-10% on short tasks, more on reading-heavy and long sessions | low; every transform is recoverable and diffs/tests/reads are never cut |
+| `balanced` (default) | lite + L1 `full`, L2 structured shaping (test-runner and install noise, head+tail on long *generic* output only, grep/glob caps with true totals), L3, L4, L4b auto-test | 0-10% on short tasks, more on reading-heavy and long sessions | low; every transform is recoverable and diffs/tests/reads are never cut |
 | `aggressive` | balanced + tighter caps, ranged reads of very large files (PreToolUse), L6 server-side masking, L5 recommendations applied | larger on long sessions; can be negative on short ones | medium; must pass the bench gate before adoption |
 
 Profile resolution order: `XEND_PROFILE` env > `.xend.json` in the project (walking up) > `~/.config/xend/config.json` > `balanced`.
@@ -84,35 +85,26 @@ Invariants:
 
 ## Session context injected at SessionStart
 
-One stable block (no timestamps, no per-turn re-injection so the prompt cache stays warm). At
-`balanced` with the adapted lean rules it is **2,578 B / ~678 tokens** (1,549 B / ~408 tokens with
-`ponytail: off`), before architect mode. Together with eight short skill descriptions and four
-agent descriptions the plugin's fixed prefix was about **1,033 tokens, roughly 3.2%** of a typical
-32,000-token prefix; the benchmark showed that even the smaller prefix is not amortized on
-five-turn tasks (~0.8% cost per 100 tokens), which is why the cheap adapted text is the default on
-`lite` and `balanced`. Architect mode is **opt-in in every profile** (bench r6/r7 found it never
-cheaper on greenfield project tasks — see "Architect mode (L7)" below): turning it on
-(`XEND_ARCHITECT=1`, `.xend.json` `{"architect":{"enabled":true}}`, or `/xend:plan on`) adds a ninth
-skill (`/xend:plan`), a fifth agent (`xend-worker-lite`), and one more paragraph to the session
-block itself — that paragraph is present only when architect mode is on. Measured with `node
-scripts/xend-cli.js context | wc -c` *(measured here)*: the default `balanced` block, architect
-off, is **1,680 B / ~442 tokens**; the same block with architect enabled (`XEND_ARCHITECT=1`) is
-**2,869 B / ~755 tokens** — the architect paragraph costs about **1,189 B / ~313 tokens** (this
-command renders the block without the lean-rules detection pass, so its totals are not directly
-comparable to the 2,578 B figure above, which includes the adapted lean text). That ~313 extra
-tokens per session, plus each builder's own cold prefix, is exactly why the layer defaults off:
-`bench/results/` r6 and r7 measured it costing more, never less, on every greenfield project-task
-configuration tried. Contents:
-- terse rules for the active level and their exemptions (security warnings, ordered instructions,
-  anything persisted outside chat stays in full prose),
-- reading discipline (grep before read, ranged reads, no re-reads of unchanged files, delegate
-  broad exploration to `xend-scout`),
-- the condensed-output contract (what a `[xend]` marker means, where the original lives, never
-  re-run a command to see more),
-- the lean build rules (the ladder, root-cause bug fixes, no unrequested abstraction), placed after
-  the reading rules so "trace the flow under the reading rule above" resolves to text already seen,
-- only when architect mode is on: the architect paragraph — when to plan, how to write and
-  dispatch a plan, and to trust xend's own re-run of a builder's verify command over its claim.
+One stable block (no timestamps, no per-turn re-injection so the prompt cache stays warm). Every
+byte of it is paid in every session: Claude Code 2.1.283 writes the prompt cache at the 1-hour TTL
+(2x the input price), and the block is re-read at 0.1x on every later turn. On a four-turn task
+that is about 2.4x the input price per token before the model has done anything, which is why the
+block was cut from **2,869 B** (plus five agent descriptions and a routing skill, ~950 tokens of
+plugin prefix in all, measured through a request-logging proxy) to about **1,000 B** at
+`balanced` with the adapted lean text. Contents, in order:
+
+- a one-line header naming the profile, terse level and lean level;
+- the terse rules for the active level, with the one exemption that matters (normal prose for
+  anything written to files, commits, PRs or issues, and for warnings);
+- the work rule: few turns, independent tool calls in one message, open the files a task names
+  directly, never re-read a file to confirm an edit or re-read an unchanged file, quiet test flags.
+  The previous rule told the model to verify every edit with a read-back or diff, which cost a turn;
+- the lean rules (the ladder, root-cause fixes, no unrequested abstraction) in one short paragraph;
+- only when architect mode is on: the architect paragraph.
+
+What is **not** in it any more: the condensed-output contract (each `[xend]` marker now says it
+itself, so a session where nothing is condensed pays nothing for it) and the delegation paragraph
+(see L3). The measured effect of the cut is in `docs/RESEARCH.md` (H16, bench r8).
 
 `vendor/ponytail/` costs **zero** tokens: Claude Code scans only `skills/` for model-invocable
 skills, so the byte-identical vendored ruleset sits outside the skill index and is read only when
@@ -131,29 +123,46 @@ installed", which costs a visible duplicate at worst, never a silently missing r
 On `SessionStart(source: compact|clear)` the block is re-injected together with the session's checkpoint
 if one exists. `resume` is not matched: the block is already in the resumed history.
 
-## Delegation contract (L3)
+## Auto-test after an edit (L4b)
 
-Subagents shipped: `xend-scout` (Haiku, read-only, returns `path:line` citations only),
-`xend-reader` (Haiku, condenses a large artifact into a brief with verbatim key lines),
-`xend-worker-lite` (Haiku, one mechanical fully-specified change in 1-3 files),
-`xend-worker` (Sonnet, implements a fully specified change and runs its tests),
-`xend-reviewer` (Sonnet, reviews a diff and returns findings only).
-The routing skill states the rules that keep quality flat and cost down: a cheaper model's result is
-accepted only when it is verified (tests, a citation the caller checks, or a diff the caller reads);
-anything ambiguous, cross-cutting, or unverifiable stays with the main model; failure escalates one
-tier; delegation happens only above a work floor (about five tool calls or tens of thousands of
-tokens), because every subagent pays a cold prompt prefix; the main session never switches model
-(caches are model-scoped).
+On short tasks the most expensive thing a model does is take another turn: every call re-reads
+the whole context. The commonest avoidable turn is "now run the tests" right after an edit. A
+session-block rule asking the model to send the edit and the test command in one message did not
+change what Sonnet does *(verified here: Claude Code runs same-message tool calls in order, but its
+own system prompt tells the model to call dependent tools sequentially)*, so xend does it
+mechanically. `scripts/record-edit.js` (PostToolUse on `Edit|MultiEdit`, main session only) calls
+`scripts/lib/autotest.js`, which:
 
-Every agent declares `tools:` explicitly so MCP schemas never load in a subagent's prefix: `Read,
-Glob, Grep` for `xend-scout`; `Read, Grep, Glob, Bash` (read-only use) for `xend-reader` and
-`xend-reviewer`; `Read, Edit, Write, MultiEdit, Grep, Glob, Bash` for `xend-worker-lite` and
-`xend-worker`. `tools:` is the only prefix lever that actually reaches a subagent: plugin agents do
-not honour `omitClaudeMd`, `hooks`, `mcpServers` or `permissionMode` *(verified here, Claude Code
-2.1.272; contradicts an earlier claim in this project that `omitClaudeMd` strips the memory prefix
-from `xend-scout` and `xend-reader` — for plugin-installed agents it does not, and the comment in
-each agent file says so)*. The `tools:` allowlist still cuts real weight: no MCP tool schemas load
-for any of them.
+1. picks a command: a configured `autoTest.command`, else `python3 -m pytest -q --tb=line -p
+   no:cacheprovider` when Python tests exist within three directory levels, else `npm test
+   --silent` when `package.json` defines a real test script, else `node --test` when `*.test.js`
+   files exist. Documentation edits never trigger a run. Every command, configured ones included,
+   must pass `verify.commandAllowed` (the same allowlist the SubagentStop verifier uses);
+2. runs it with a hard timeout (20 s) and switches itself off for the session when a run takes
+   longer than `autoTest.maxMs` (8 s), saying so once;
+3. hands the model one `additionalContext` note: the command, exit code, the failure lines and
+   summary (passing rows and runtime stack frames dropped, capped at 1,200 characters, original
+   saved when longer), and on a pass "do not re-run it to confirm". A result identical to the
+   previous auto-test (timings ignored) collapses to one line.
+
+It never runs after `Write` (a file being created is usually half a feature, and its failing tests
+are noise), never inside subagents, and is off in `lite`.
+
+## Delegation (L3)
+
+Only the two architect-mode builders ship as plugin agents: `xend-worker-lite` (Haiku, one
+mechanical fully-specified change) and `xend-worker` (Sonnet, one fully specified task). Their
+descriptions say to use them only for `plan next` briefs, so outside architect mode they cost two
+short lines of agent listing and nothing else. `xend-scout`, `xend-reader` and `xend-reviewer` moved
+to `extras/agents/`: plain xend spawned none of them on any project-bench task (r6, r7b), and every
+plugin agent is listed in every session. Copied into `~/.claude/agents/` or `.claude/agents/` they
+work as before, the SubagentStop verifier still checks their citations by name, and — unlike
+plugin agents — they honour `omitClaudeMd`. Claude Code's built-in `Explore` agent covers most of
+what `xend-scout` did.
+
+Every agent declares `tools:` explicitly so MCP schemas never load in a subagent's prefix; `tools:`
+is the only prefix lever that reaches a plugin subagent (plugin agents do not honour
+`omitClaudeMd`, `hooks`, `mcpServers` or `permissionMode`, *verified here, Claude Code 2.1.272*).
 
 ## Architect mode (L7)
 
@@ -165,11 +174,9 @@ deterministic hook verifies what they claim before the plan advances. Full desig
 
 | Role | Who | Context contains | Never |
 |---|---|---|---|
-| Architect | the main session | the task, scout citations, pinned interfaces, the plan, builder reports, verify output | file bodies it will not edit itself |
-| Scout | `xend-scout` (Haiku, low) | read-only search | edits |
+| Architect | the main session | the task, search results (Grep/Glob or the built-in Explore agent), pinned interfaces, the plan, builder reports, verify output | file bodies it will not edit itself |
 | Builder lite | `xend-worker-lite` (Haiku, low) | one mechanical task: exact diff, or a named function with pinned behaviour and a test to satisfy, 1-3 files | design decisions |
 | Builder | `xend-worker` (Sonnet, medium) | one fully specified task | redesign, out-of-scope files |
-| Reviewer | `xend-reviewer` (Sonnet, medium) | a diff | edits |
 | Verifier | `scripts/subagent-stop.js` (deterministic, no model) | the subagent's final reply, its transcript, the plan | summarizing |
 
 ### The plan

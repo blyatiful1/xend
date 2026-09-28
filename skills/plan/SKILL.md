@@ -20,7 +20,7 @@ Requested: `$ARGUMENTS` (empty means `status`). It must be one of `status`, `nex
 
 Show that command's output verbatim, then continue.
 
-If architect mode is on, restate the protocol in one short paragraph: locate with `xend-scout`
+If architect mode is on, restate the protocol in one short paragraph: locate with Grep, Glob or the built-in `Explore` agent
 and read only the interfaces you must pin; write the plan with `plan set`; run `plan next` for
 ready briefs and dispatch each with one `Agent` call (`xend-worker-lite` for lite tasks,
 `xend-worker` otherwise, prompt = the brief, independent tasks in one message); trust xend's own

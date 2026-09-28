@@ -116,22 +116,24 @@ test('context block is stable and contains no timestamps', () => {
 });
 
 test('ponytail profile defaults, env overrides and clamps', () => {
+  // Lean rules are opt-in in every profile since bench r8 (docs/RESEARCH.md H19).
   const base = config.resolve({ env: {}, cwd: os.tmpdir() });
-  assert.strictEqual(base.ponytail, 'full');
+  assert.strictEqual(base.ponytail, 'off');
   assert.strictEqual(base.ponytailText, 'adapted');
   assert.strictEqual(base.upstream.ponytail, 'auto');
   assert.strictEqual(base.ponytailStrict, false);
 
   const lite = config.resolve({ env: { XEND_PROFILE: 'lite' }, cwd: os.tmpdir() });
-  assert.strictEqual(lite.ponytail, 'lite');
+  assert.strictEqual(lite.ponytail, 'off');
   assert.strictEqual(lite.ponytailText, 'adapted');
 
   const agg = config.resolve({ env: { XEND_PROFILE: 'aggressive' }, cwd: os.tmpdir() });
-  assert.strictEqual(agg.ponytail, 'full');
+  assert.strictEqual(agg.ponytail, 'off');
   assert.strictEqual(agg.ponytailText, 'adapted');
 
   assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'ultra' }, cwd: os.tmpdir() }).ponytail, 'ultra');
-  assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'bogus' }, cwd: os.tmpdir() }).ponytail, 'full');
+  assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'bogus' }, cwd: os.tmpdir() }).ponytail, 'off');
+  assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL: 'full' }, cwd: os.tmpdir() }).ponytail, 'full');
   assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL_TEXT: 'bogus' }, cwd: os.tmpdir() }).ponytailText, 'adapted');
   assert.strictEqual(config.resolve({ env: { XEND_UPSTREAM_PONYTAIL: 'ignore' }, cwd: os.tmpdir() }).upstream.ponytail, 'ignore');
   assert.strictEqual(config.resolve({ env: { XEND_UPSTREAM_PONYTAIL: 'bogus' }, cwd: os.tmpdir() }).upstream.ponytail, 'auto');
@@ -139,8 +141,8 @@ test('ponytail profile defaults, env overrides and clamps', () => {
   assert.strictEqual(config.resolve({ env: { XEND_PONYTAIL_STRICT: 'off' }, cwd: os.tmpdir() }).ponytailStrict, false);
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-pony-cfg-'));
-  fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({ ponytail: 'off' }));
-  assert.strictEqual(config.resolve({ env: {}, cwd: dir }).ponytail, 'off');
+  fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({ ponytail: 'full' }));
+  assert.strictEqual(config.resolve({ env: {}, cwd: dir }).ponytail, 'full');
   assert.deepStrictEqual(config.PONYTAIL_LEVELS, ponytail.PONYTAIL_LEVELS);
 });
 

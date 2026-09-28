@@ -5,7 +5,7 @@ xend resolves its configuration in this order (later wins):
 1. profile defaults (`lite`, `balanced`, `aggressive`), see `scripts/lib/config.js`
 2. `~/.config/xend/config.json` (user; `$XDG_CONFIG_HOME/xend/config.json` when set)
 3. the nearest `.xend.json` walking up from the working directory (project)
-4. environment variables: `XEND_PROFILE`, `XEND_TERSE`, `XEND_SHAPE=0`, `XEND_SHAPE_MAX_CHARS`, `XEND_DEDUPE=0`, `XEND_DELEGATION=0`, `XEND_CHECKPOINT=0`, `XEND_READING=0`, and per-transform kill switches `XEND_SHAPE_TESTRUNNERS=0`, `XEND_SHAPE_PKG=0`, `XEND_SHAPE_HEADTAIL=0`, `XEND_SHAPE_ANSI=0`, `XEND_SHAPE_MCP=0`, plus the lean-rules switches `XEND_PONYTAIL=off|lite|full|ultra`, `XEND_PONYTAIL_TEXT=adapted|upstream`, `XEND_UPSTREAM_PONYTAIL=auto|yield|ignore`, `XEND_PONYTAIL_STRICT=1`, and the architect switches `XEND_ARCHITECT=0|1` (overrides `architect.enabled`), `XEND_VERIFY=0` (disables the `SubagentStop` verifier), `XEND_ARCHITECT_GATE=0` (disables the `PreToolUse` gate)
+4. environment variables: `XEND_PROFILE`, `XEND_TERSE`, `XEND_SHAPE=0`, `XEND_SHAPE_MAX_CHARS`, `XEND_DEDUPE=0`, `XEND_DELEGATION=0`, `XEND_CHECKPOINT=0`, `XEND_READING=0`, `XEND_AUTOTEST=0|1`, `XEND_AUTOTEST_CMD=<allowlisted command>`, and per-transform kill switches `XEND_SHAPE_TESTRUNNERS=0`, `XEND_SHAPE_PKG=0`, `XEND_SHAPE_HEADTAIL=0`, `XEND_SHAPE_ANSI=0`, `XEND_SHAPE_MCP=0`, plus the lean-rules switches `XEND_PONYTAIL=off|lite|full|ultra`, `XEND_PONYTAIL_TEXT=adapted|upstream`, `XEND_UPSTREAM_PONYTAIL=auto|yield|ignore`, `XEND_PONYTAIL_STRICT=1`, and the architect switches `XEND_ARCHITECT=0|1` (overrides `architect.enabled`), `XEND_VERIFY=0` (disables the `SubagentStop` verifier), `XEND_ARCHITECT_GATE=0` (disables the `PreToolUse` gate)
 5. session overrides set by skills (`/xend:terse off`, `/xend:ponytail ultra`, `/xend:plan off|on` and friends), stored in the session state directory
 
 Any layer may set `"profile"` and override individual keys. Example `.xend.json` for a repo whose test output is the signal you want to keep in full:
@@ -32,7 +32,9 @@ Any layer may set `"profile"` and override individual keys. Example `.xend.json`
 | `shape.grepMaxLines` / `shape.globMaxFiles` (true totals always kept) | off | 400 / 400 | 250 / 250 |
 | `shape.readLimitMinLines` (PreToolUse: unranged Read of a file with at least N lines becomes a ranged read of `readLimit` lines) | off | off | 800 lines, limit 250 |
 | `shape.mcp` (shape MCP tool text results) | off | off | on |
-| `delegation` (subagents advertised in the session block) | on | on | on |
+| `delegation` (kept for configs that set it; the session block no longer advertises subagents) | on | on | on |
+| `autoTest.enabled` (after an Edit/MultiEdit in the main session, run the project's quick tests and attach the result so the model skips its own test turn; allowlisted commands only, switched off for the session when a run exceeds `autoTest.maxMs`) | off | on | on |
+| `autoTest.command` (empty = detect: pytest when Python tests exist, else `npm test` with a real test script, else `node --test` with `*.test.js` files) / `maxMs` / `timeoutMs` / `maxChars` | `''` / 8000 / 20000 / 1200 | same | same |
 | `checkpoint` (PreCompact checkpoint, re-injected on compact/clear) | on | on | on |
 | `contextEditing` (server-side clearing of old tool results via `CLAUDE_CODE_EXTRA_BODY`) | off | off | on: trigger 110k input tokens, keep 12 tool uses, clear at least 40k |
 | `architect.enabled` (plan-then-build: the main model plans, cheap subagents build in disposable contexts) (opt-in: XEND_ARCHITECT=1, .xend.json, or /xend:plan on; docs/ARCHITECTURE.md L7) | false | false | false |
@@ -52,6 +54,8 @@ Per-session files live in the first of: `$XEND_STATE_DIR/<session-id>`, `<scratc
 | `config.json` | the configuration resolved at session start (per-call hooks read this instead of walking the filesystem) |
 | `dedupe.json` | registry of recent Bash commands and output hashes; reset on compact/clear |
 | `edits.jsonl` | files touched by Edit/Write, recorded exactly (the transcript is written with a lag) |
+| `autotest.json` | the auto-test's last result signature, run count, and whether it switched itself off (slow suite, missing runner) |
+| `tool-autotest-<id>.txt` | full output of an auto-test run whose note was capped |
 | `shaping.jsonl` | one record per shaped result (chars before/after, transform kinds) and one per recovery (the model read a persisted original) |
 | `checkpoint.md` | written by the PreCompact hook and by `/xend:checkpoint`; re-injected after compact/clear |
 | `session.json` | overrides set by skills for this session |
@@ -115,8 +119,7 @@ channel xend cannot see, such as a Cursor rule or an enterprise-managed settings
 No profile selects `ponytailText: upstream` by default. Setting it (config, `XEND_PONYTAIL_TEXT=upstream`, or `/xend:ponytail` with the session override) swaps xend's ~215-token adaptation for upstream's ~1,382-token verbatim text; bench run r5 measured that swap at +16.7% cost and +8.6% output tokens on five-turn tasks, so use it only where the JetBrains result applies: long, code-heavy sessions. `/xend:doctor` reports the active text as `text: adapted` or `text: upstream-verbatim (measured)`.
 
 xend ships **no** `SubagentStart` hook and does not port upstream's: it would add ~1,382 tokens to
-every `xend-scout` and `xend-reader` call, which are Haiku subagents whose whole purpose is to be
-cheap. If an upstream install has one, `/xend:doctor` reports it; there is no xend-side remedy.
+every subagent call, including the Haiku builders whose whole purpose is to be cheap. If an upstream install has one, `/xend:doctor` reports it; there is no xend-side remedy.
 
 Detection depends on undocumented Claude Code internals and is verified against one build. Every
 read is guarded and degrades to "not installed", so a CLI change produces a visible duplicate

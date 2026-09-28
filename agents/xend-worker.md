@@ -1,6 +1,6 @@
 ---
 name: xend-worker
-description: xend architect-mode builder (Sonnet): implements one brief printed by `xend-cli plan next`. Use only for those briefs.
+description: Architect-mode builder (Sonnet). Only for briefs from xend plan next.
 model: sonnet
 effort: medium
 tools: Read, Edit, Write, MultiEdit, Grep, Glob, Bash

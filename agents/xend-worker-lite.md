@@ -1,6 +1,6 @@
 ---
 name: xend-worker-lite
-description: xend architect-mode builder (Haiku): applies one mechanical brief printed by `xend-cli plan next`. Use only for those briefs.
+description: Architect-mode builder (Haiku). Only for briefs from xend plan next.
 model: haiku
 effort: low
 tools: Read, Edit, Write, MultiEdit, Grep, Glob, Bash

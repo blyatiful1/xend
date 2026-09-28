@@ -31,16 +31,20 @@ claude plugin validate . --strict # plugin and marketplace manifests
   with the procedure in `vendor/ponytail/PROVENANCE.md` and update both hash tables;
   `tests/ponytail.test.js` will fail otherwise.
 - New skills, agents or hooks add to every session's fixed prefix. Say in the PR what they
-  cost in tokens and why that rent is worth paying.
+  cost in tokens and why that rent is worth paying. Measure it rather than estimate it: the
+  warm-up line of `node bench/run.js` prints each arm's first-request cache write, and the
+  difference between a baseline and an xend arm is exactly what the plugin adds per session
+  (this text tokenizes at roughly 2.7 characters per token, not 4). Anything useful only to some
+  users belongs in `extras/`, which Claude Code does not scan.
 - **Agent reply formats** (the `Result: / Changed: / Verification: / Notes:` block in
-  `xend-worker`/`xend-worker-lite`, the citation and evidence lines in `xend-scout`/
-  `xend-reader`/`xend-reviewer`) are contracts parsed by `scripts/lib/verify.js`, not just
+  `xend-worker`/`xend-worker-lite`, the citation and evidence lines in `extras/agents/`
+  `xend-scout`/`xend-reader`/`xend-reviewer`) are contracts parsed by `scripts/lib/verify.js`, not just
   prose: changing the wording, field order or line format needs a matching change in
   `verify.js` and in `tests/verify.test.js`, or `scripts/subagent-stop.js` silently stops
   verifying what the agent claims. New hooks must never call a model and must never run a
   command that is not checked against an explicit allowlist first (see
   `scripts/lib/verify.js`'s `commandAllowed`); this holds for every hook, not only
-  `SubagentStop`.
+  `SubagentStop` (the auto-test in `scripts/lib/autotest.js` goes through the same check).
 
 ## Reporting bugs
 

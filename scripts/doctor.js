@@ -670,7 +670,7 @@ function checkPonytail(cwd) {
     findings.push(finding(
       'medium', 'plugins', 'The ponytail plugin also injects into every subagent',
       'a SubagentStart hook running ponytail-subagent.js was found',
-      'It re-injects ~1,382 tokens into every xend-scout and xend-reader call. Those are Haiku subagents whose entire purpose is to be cheap and to return citations only, so the hook works against their contract. xend ships no SubagentStart hook of its own.',
+      'It re-injects ~1,382 tokens into every subagent call, including the Haiku builders of architect mode and any Explore-style subagent whose entire purpose is to be cheap, so the hook works against their contract. xend ships no SubagentStart hook of its own.',
       'There is no xend-side remedy: a plugin cannot disable another plugin\'s hook. Either accept the cost, disable ponytail (claude plugin disable ponytail), or raise it upstream.',
       null
     ));

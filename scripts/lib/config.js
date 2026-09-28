@@ -12,7 +12,7 @@ const PROFILES = {
   lite: {
     profile: 'lite',
     terse: 'lite',
-    ponytail: 'lite',        // lean build rules; 'adapted' text is xend's own condensation and is untested
+    ponytail: 'off',         // lean build rules, opt-in: bench r8 found the adapted text no cheaper and behind a pass-rate drop (docs/RESEARCH.md H19)
     ponytailText: 'adapted',
     upstream: { ponytail: 'auto' },
     ponytailStrict: false,
@@ -46,7 +46,7 @@ const PROFILES = {
   balanced: {
     profile: 'balanced',
     terse: 'full',
-    ponytail: 'full',        // lean build rules; 'adapted' text is xend's own condensation and is untested
+    ponytail: 'off',         // lean build rules, opt-in: bench r8 found the adapted text no cheaper and behind a pass-rate drop (docs/RESEARCH.md H19)
     ponytailText: 'adapted',
     upstream: { ponytail: 'auto' },
     ponytailStrict: false,
@@ -79,7 +79,7 @@ const PROFILES = {
   aggressive: {
     profile: 'aggressive',
     terse: 'full',
-    ponytail: 'full',        // lean build rules; 'adapted' text is xend's own condensation and is untested
+    ponytail: 'off',         // lean build rules, opt-in: bench r8 found the adapted text no cheaper and behind a pass-rate drop (docs/RESEARCH.md H19)
     ponytailText: 'adapted',      // upstream-verbatim text is opt-in (XEND_PONYTAIL_TEXT=upstream): bench r5 measured +16.7% cost on micro-tasks
     upstream: { ponytail: 'auto' },
     ponytailStrict: false,
