@@ -4,7 +4,11 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const autotest = require('../scripts/lib/autotest.js');
+
+// The CI unit-test job has Node but not pytest; the pytest-backed cases run wherever it exists.
+const NO_PYTEST = spawnSync('python3', ['-c', 'import pytest'], { stdio: 'ignore' }).status !== 0 && 'pytest not installed';
 
 // node --test marks its children with NODE_TEST_CONTEXT; a nested `node --test` started by the
 // hook would inherit it and skip its files, so each run() call here gets it removed temporarily.
@@ -90,17 +94,40 @@ test('run: a failing suite reports exit and the failure, without the do-not-re-r
   assert.ok(!r.includes('do not re-run'));
 });
 
-test('run: a suite that cannot be collected yet (missing module) produces no note', () => {
+test('run: a suite that cannot be collected yet (missing module) produces no note', { skip: NO_PYTEST }, () => {
   const d = tmp({ 'a.py': 'x = 1\n', 'test_a.py': 'import not_written_yet\ndef test_a():\n    pass\n' });
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
   assert.strictEqual(run({ root: d, file: path.join(d, 'a.py'), cfg: {}, dir: stateDir, toolUseId: 't1' }), null);
 });
 
-test('run: a pytest failure is reported as compact FAILED lines plus the summary', () => {
+test('run: a pytest failure is reported as compact FAILED lines plus the summary', { skip: NO_PYTEST }, () => {
   const d = tmp({ 'a.py': 'x = 1\n', 'test_a.py': 'def test_a():\n    assert 1 == 2, "values differ"\ndef test_b():\n    pass\n' });
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
   const r = run({ root: d, file: path.join(d, 'a.py'), cfg: {}, dir: stateDir, toolUseId: 't1' });
   assert.ok(r.includes('FAILED test_a.py::test_a - AssertionError: values differ'), r);
   assert.ok(r.includes('1 failed, 1 passed'), r);
   assert.ok(!r.includes('short test summary info'), r);
+});
+
+test('bashRuleMatches: bare Bash, prefix and glob rules, python -m aliasing', () => {
+  const cmd = autotest.PY_CMD;
+  assert.ok(autotest.bashRuleMatches('Bash', cmd));
+  assert.ok(autotest.bashRuleMatches('Bash(*)', cmd));
+  assert.ok(autotest.bashRuleMatches('Bash(python3 -m pytest:*)', cmd));
+  assert.ok(autotest.bashRuleMatches('Bash(pytest:*)', cmd), 'a pytest rule covers python3 -m pytest');
+  assert.ok(autotest.bashRuleMatches('Bash(npm test *)', 'npm test --silent'));
+  assert.ok(!autotest.bashRuleMatches('Bash(npm run build:*)', 'npm test --silent'));
+  assert.ok(!autotest.bashRuleMatches('Read', cmd));
+  assert.ok(!autotest.bashRuleMatches('Bash(git push:*)', cmd));
+});
+
+test('run: a deny or ask rule for the command in project settings keeps the auto-test off', () => {
+  for (const key of ['deny', 'ask']) {
+    const d = tmp({ 'a.js': '', 'a.test.js': 'require("assert").strictEqual(1, 1);\n', '.claude/settings.json': JSON.stringify({ permissions: { [key]: ['Bash(node --test:*)'] } }) });
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
+    assert.strictEqual(run({ root: d, file: path.join(d, 'a.js'), cfg: {}, dir: stateDir, toolUseId: 't1' }), null, key);
+  }
+  const allowed = tmp({ 'a.js': '', 'a.test.js': 'require("assert").strictEqual(1, 1);\n', '.claude/settings.json': JSON.stringify({ permissions: { allow: ['Bash(node --test:*)'] } }) });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
+  assert.ok(run({ root: allowed, file: path.join(allowed, 'a.js'), cfg: {}, dir: stateDir, toolUseId: 't1' }));
 });

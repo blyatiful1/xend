@@ -5,13 +5,15 @@
 // session-block rule asking the model to batch the edit and the test in one message did not change
 // what Sonnet does (verified here); a hook does not need the model's cooperation.
 //
-// Safety: only commands that pass verify.commandAllowed run (a configured command included), never
-// inside subagents, never after Write (a file being created is usually half a feature, and its
-// failing tests are noise), and a suite slower than maxMs switches the feature off for the session.
+// Safety: only commands that pass verify.commandAllowed run (a configured command included), none
+// that a Claude Code permission rule denies or asks about (blockedByPermissions), never inside
+// subagents, never after Write (a file being created is usually half a feature, and its failing
+// tests are noise), and a suite slower than maxMs switches the feature off for the session.
 const fs = require('fs');
 const path = require('path');
 const verify = require('./verify.js');
 const state = require('./state.js');
+const settings = require('./settings.js');
 
 // --tb=no -rfE: one 'FAILED test - message' line per failure, the most compact form that still names
 // what broke; the model runs pytest itself when it needs a traceback.
@@ -76,6 +78,34 @@ function detectRaw(root, file, cfg) {
   return null;
 }
 
+// A Claude Code permission rule for Bash ("Bash", "Bash(npm test:*)", "Bash(pytest *)") tested
+// against a command. Legacy ":*" prefix rules and "*" globs both match.
+function bashRuleMatches(rule, cmd) {
+  const m = /^Bash(?:\((.*)\))?$/.exec(String(rule || '').trim());
+  if (!m) return false;
+  const spec = m[1];
+  if (spec === undefined || spec.trim() === '' || spec.trim() === '*') return true;
+  const pat = spec.trim().endsWith(':*') ? spec.trim().slice(0, -2) + '*' : spec.trim();
+  const re = new RegExp('^' + pat.split('*').map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
+  const bare = cmd.replace(/^python3?\s+-m\s+/, '');
+  return re.test(cmd) || re.test(bare);
+}
+
+// The hook runs without a permission prompt, so a user who has told Claude Code to deny or ask
+// about this command (or about Bash altogether) keeps that decision: the auto-test stays off.
+function blockedByPermissions(cmd, root) {
+  let layers;
+  try { layers = settings.loadSettingsLayers(root); } catch (_) { return false; }
+  for (const l of [layers.user, layers.project, layers.local]) {
+    const p = l && l.value && l.value.permissions;
+    if (!p) continue;
+    for (const key of ['deny', 'ask']) {
+      for (const rule of Array.isArray(p[key]) ? p[key] : []) if (bashRuleMatches(rule, cmd)) return true;
+    }
+  }
+  return false;
+}
+
 // Keeps the decisive part of a test run within maxChars: failure lines and the summary. Passing
 // progress rows (dots, "ok" lines) carry nothing once the summary says how many passed.
 function condense(text, maxChars) {
@@ -114,6 +144,7 @@ function run(opts) {
   if (st.disabled) return null;
   const cmd = detectCommand(root, file, ac);
   if (!cmd) return null;
+  if (blockedByPermissions(cmd, root)) return null;
   const r = verify.runVerify(cmd, root, ac.timeoutMs || 20000);
   const combined = (r.stdout || '') + (r.stderr ? '\n' + r.stderr : '');
   const secs = (r.ms / 1000).toFixed(1) + 's';
@@ -143,4 +174,4 @@ function run(opts) {
   return head + ':\n' + body + full + tail;
 }
 
-module.exports = { detectCommand, condense, signature, findTests, run, PY_CMD };
+module.exports = { detectCommand, condense, signature, findTests, run, bashRuleMatches, blockedByPermissions, PY_CMD };

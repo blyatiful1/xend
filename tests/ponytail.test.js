@@ -253,7 +253,7 @@ test('G. xend-authored lean text carries no arrows, no caveman, no /ponytail swi
 
 test('H. strict mode emits upstream text and nothing else of xend\'s', () => {
   const strict = blockFor({ detected: DETECTED.none, level: 'full', upstream: 'auto', text: 'upstream', strict: true });
-  // the CONDENSED part mentions "[xend]" on its own, so count against a ponytail-off block
+  // count against a ponytail-off block, so only the lean text's own tags are compared
   const tags = (s) => s.split(' [xend]').length - 1;
   const baseTags = tags(blockFor({ detected: DETECTED.none, level: 'off', upstream: 'auto', text: 'adapted' }));
   assert.strictEqual(tags(strict), baseTags, 'strict mode must add no [xend] tag');

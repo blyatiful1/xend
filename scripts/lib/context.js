@@ -5,8 +5,9 @@ const path = require('path');
 const ponytail = require('./ponytail.js');
 
 // Every sentence below is paid for in every session: written once to the prompt cache at 2x the
-// input price (Claude Code's 1-hour TTL) and re-read at 0.1x on every later turn. Bench r8 measured
-// the previous ~950-token prefix at +7% cost on short tasks; keep additions rare and short.
+// input price (Claude Code's 1-hour TTL) and re-read at 0.1x on every later turn. The previous
+// release's ~1,400-token prefix measured +5.8% cost on short tasks (bench r8 + r10); this block
+// plus the builder descriptions is ~413 tokens. Keep additions rare and short.
 const TERSE = {
   off: '',
   lite: 'Replies: concise, full sentences. No filler, hedging or narration of tool calls; do not restate code, diffs or file contents; end with at most one summary line.',
@@ -23,18 +24,16 @@ const TERSE_EXEMPTIONS = 'Normal prose for anything written to files, commits, P
 // (scripts/lib/autotest.js) removes that turn mechanically instead.
 const READING = 'Work in few turns; each turn re-reads the whole context. Put independent tool calls in one message. Open files the task names directly (by range if large); search only for what you cannot name. Never re-read a file to confirm an edit, or re-read an unchanged file. Quiet test flags (pytest -q).';
 
-// Kept for callers that still reference it; the explanation now travels in every [xend] marker
-// itself, so a session in which nothing is condensed pays nothing for it.
-const CONDENSED = '';
-
-const DELEGATION = '';
+// No condensed-output paragraph: the explanation travels in every [xend] marker itself
+// (scripts/post-tool-use.js), so a session in which nothing is condensed pays nothing for it. No
+// delegation paragraph either: the only shipped agents are architect-mode builders.
 
 // scripts/xend-cli.js, used verbatim inside ARCHITECT below; session-start.js and the `context`
 // CLI command both pass their own resolved absolute path via opts.cliPath, but a default keeps
 // the block sane for any other caller.
 const DEFAULT_CLI_PATH = path.join(__dirname, '..', 'xend-cli.js');
 
-// One paragraph, SPEC-architect.md section 4. Injected after DELEGATION when architect mode is
+// One paragraph, SPEC-architect.md section 4. Injected last when architect mode is
 // enabled; the CLI path is the only environment-specific string in it, so the block otherwise
 // stays free of per-turn variation. `gate` (SPEC section 13) appends one sentence noting the
 // mechanical floor pre-edit-gate.js enforces; omit or pass false to leave it out.
@@ -110,4 +109,4 @@ function build(cfg, opts) {
   return parts.join('\n\n');
 }
 
-module.exports = { build, ponytailParts, TERSE, TERSE_EXEMPTIONS, READING, CONDENSED, DELEGATION, LEAN, LEAN_LEVEL, LEAN_UPSTREAM, LEAN_BRIDGE, architectText, DEFAULT_CLI_PATH };
+module.exports = { build, ponytailParts, TERSE, TERSE_EXEMPTIONS, READING, LEAN, LEAN_LEVEL, LEAN_UPSTREAM, LEAN_BRIDGE, architectText, DEFAULT_CLI_PATH };

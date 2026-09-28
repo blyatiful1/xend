@@ -33,7 +33,7 @@ Any layer may set `"profile"` and override individual keys. Example `.xend.json`
 | `shape.readLimitMinLines` (PreToolUse: unranged Read of a file with at least N lines becomes a ranged read of `readLimit` lines) | off | off | 800 lines, limit 250 |
 | `shape.mcp` (shape MCP tool text results) | off | off | on |
 | `delegation` (kept for configs that set it; the session block no longer advertises subagents) | on | on | on |
-| `autoTest.enabled` (after an Edit/MultiEdit in the main session, run the project's quick tests and attach the result so the model skips its own test turn; allowlisted commands only, switched off for the session when a run exceeds `autoTest.maxMs`) | off | on | on |
+| `autoTest.enabled` (after an Edit/MultiEdit in the main session, run the project's quick tests and attach the result so the model skips its own test turn; allowlisted commands only, never one your `permissions.deny`/`ask` rules cover, switched off for the session when a run exceeds `autoTest.maxMs`) | off | on | on |
 | `autoTest.command` (empty = detect: pytest when Python tests exist, else `npm test` with a real test script, else `node --test` with `*.test.js` files) / `maxMs` / `timeoutMs` / `maxChars` | `''` / 8000 / 20000 / 1200 | same | same |
 | `checkpoint` (PreCompact checkpoint, re-injected on compact/clear) | on | on | on |
 | `contextEditing` (server-side clearing of old tool results via `CLAUDE_CODE_EXTRA_BODY`) | off | off | on: trigger 110k input tokens, keep 12 tool uses, clear at least 40k |

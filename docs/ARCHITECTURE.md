@@ -139,7 +139,10 @@ mechanically. `scripts/record-edit.js` (PostToolUse on `Edit|MultiEdit`, main se
    no:cacheprovider` when Python tests exist within three directory levels, else `npm test
    --silent` when `package.json` defines a real test script, else `node --test` when `*.test.js`
    files exist. Documentation edits never trigger a run. Every command, configured ones included,
-   must pass `verify.commandAllowed` (the same allowlist the SubagentStop verifier uses);
+   must pass `verify.commandAllowed` (the same allowlist the SubagentStop verifier uses), and a
+   Bash rule in the user's `permissions.deny` or `permissions.ask` (any settings layer) that matches
+   the command, or a bare `Bash`, keeps it from running: a hook bypasses the permission prompt, so
+   the user's own rules decide;
 2. runs it with a hard timeout (20 s) and switches itself off for the session when a run takes
    longer than `autoTest.maxMs` (8 s), saying so once;
 3. hands the model one `additionalContext` note: the command, exit code, the failure lines and

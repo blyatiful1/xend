@@ -128,7 +128,7 @@ Every mechanism follows the same rules, and the benchmark exists to catch violat
 4. `Read` results are never altered. Grep and Glob caps keep the true counts.
 5. Nothing shapes inside subagents.
 6. Promotion of a profile requires the bench to pass three gates at once: pass-rate delta not worse than -3 points, cost confidently lower, turns not higher.
-7. The auto-test runs only allowlisted test commands (the same allowlist the verifier uses), never inside subagents and never after `Write`, with a 20-second timeout; a suite slower than 8 seconds switches it off for the session, and a suite that cannot be collected yet produces no note at all. Its note names the command it ran, so a pass is never mistaken for the task's own test.
+7. The auto-test runs only allowlisted test commands (the same allowlist the verifier uses) and never one that a Claude Code permission rule of yours denies or asks about (`Bash`, `Bash(npm test:*)`, ...): a hook runs without a permission prompt, so your rules decide. It never runs inside subagents or after `Write`, has a 20-second timeout, and a suite slower than 8 seconds switches it off for the session, and a suite that cannot be collected yet produces no note at all. Its note names the command it ran, so a pass is never mistaken for the task's own test.
 8. A subagent's claim is never trusted unverified: when its `Verification: <command> -> ...` line matches the allowlist, xend re-runs the command itself; every citation it makes is checked against the real files; a mismatch or a bad citation is sent back to the subagent for restatement; a command outside the allowlist is recorded as unverifiable, never run and never trusted as a PASS.
 
 ## Benchmark
