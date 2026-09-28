@@ -61,13 +61,27 @@ An arm is either the legacy bare label (`baseline`, `xend` — kind = label, mod
 the previous release and the working tree run in the same paired pass (`git worktree add ../xend-main
 origin/main`, then `--arms "baseline,old:xend@../xend-main:sonnet,new:xend:sonnet"`). For per-arm
 environment (ablations such as auto-test off) use `--arms-file`, a JSON array of `{label, kind, model,
-mode, pluginDir, env}`:
+mode, pluginDir, env, args}`:
 
 ```json
 [{"label": "baseline", "kind": "baseline"},
  {"label": "new", "kind": "xend"},
  {"label": "new-noat", "kind": "xend", "env": {"XEND_AUTOTEST": "0"}}]
 ```
+
+An entry's `env` reaches its arm whatever its kind, so two plain Claude Code arms can differ in one
+Claude Code setting; `args` are extra `claude` arguments for that arm. The cache-lifetime runs
+(`bench/results/r12-*`) used a distinct system-prompt line per arm so the arms could not share
+cache entries, and every run records the lifetime its writes were billed at (`cache_write_1h`,
+`cache_write_5m`); an ambient lifetime setting never reaches a child:
+
+```json
+[{"label": "ttl-1h", "kind": "baseline", "env": {"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h"}, "args": ["--append-system-prompt", "Benchmark arm: A."]},
+ {"label": "ttl-5m", "kind": "baseline", "env": {"CLAUDE_CODE_PROMPT_CACHE_TTL": "5m"}, "args": ["--append-system-prompt", "Benchmark arm: B."]}]
+```
+
+`node bench/run.js --help` prints the options; an unknown argument stops the run before any job
+starts.
 
 Any number of arms can run in one pass, e.g. to compare "one model does everything" against "xend architect mode" across several models:
 

@@ -17,7 +17,9 @@
 // global --model for that arm. mode (xend only) is `architect` (XEND_ARCHITECT=1: main model plans,
 // subagents build) or `plain` (default, XEND_ARCHITECT=0). kind may also be `xend@<dir>` to load the
 // plugin from another checkout (e.g. the previous release), so old and new xend run in one paired pass.
-// --arms-file takes a JSON array of {label, kind, model, mode, pluginDir, env} for per-arm env.
+// --arms-file takes a JSON array of {label, kind, model, mode, pluginDir, env, args}: env is set for
+// that arm whatever its kind (e.g. {"CLAUDE_CODE_PROMPT_CACHE_TTL": "5m"} on a baseline arm), args
+// are extra `claude` arguments. --help prints this; an unknown argument stops before any job runs.
 //
 // Environment: every child runs as a plain local `claude -p` (the hosting session's entrypoint and
 // session variables are removed) with an explicit, local-like tool set (--toolset local, the default)
@@ -64,8 +66,17 @@ function parseArgs(argv) {
     else if (a === '--dry-run') o.dryRun = true;
     else if (a === '--list') o.list = true;
     else if (a === '--extra') { o.extra.push(v); i++; }
+    else if (a === '--help' || a === '-h') o.help = true;
+    // anything else stops the run: a mistyped flag must never start paid jobs with defaults
+    else if (!o.error) o.error = 'unknown argument: ' + a;
   }
   return o;
+}
+
+function usage() {
+  const src = fs.readFileSync(__filename, 'utf8').split('\n');
+  const end = src.findIndex((l, i) => i > 2 && !l.startsWith('//'));
+  return src.slice(2, end).map((l) => l.replace(/^\/\/ ?/, '')).join('\n');
 }
 
 // Pure: parse one --arms entry. Legacy bare label ("baseline", "xend"): kind = label, model =
@@ -97,6 +108,7 @@ function normalizeArm(a, defaults) {
   const arm = { label: String(a.label), kind, model: a.model || defaults.model, mode: kind === 'xend' && a.mode === 'architect' ? 'architect' : 'plain' };
   if (kind === 'xend' && a.pluginDir) arm.pluginDir = a.pluginDir;
   if (a.env && typeof a.env === 'object') arm.env = Object.assign({}, a.env);
+  if (Array.isArray(a.args) && a.args.length) arm.args = a.args.map(String);
   return arm;
 }
 
@@ -164,8 +176,34 @@ function cleanEnv(extra) {
   // session's) gets that host's system prompt and side requests instead of a plain `claude -p`'s.
   for (const k of ['CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'XEND_PROFILE', 'XEND_TERSE', 'XEND_SHAPE',
     'XEND_PONYTAIL', 'XEND_PONYTAIL_TEXT', 'XEND_UPSTREAM_PONYTAIL', 'XEND_PONYTAIL_STRICT', 'PONYTAIL_DEFAULT_MODE', 'XEND_ARCHITECT',
-    'XEND_TRUST_TESTS', 'XEND_AUTOTEST', 'XEND_AUTOTEST_CMD']) delete env[k];
+    'XEND_TRUST_TESTS', 'XEND_AUTOTEST', 'XEND_AUTOTEST_CMD',
+    // an ambient cache-lifetime choice would change what every arm pays; an arm sets it explicitly
+    ...CACHE_TTL_VARS]) delete env[k];
   return Object.assign(env, extra);
+}
+
+const CACHE_TTL_VARS = ['CLAUDE_CODE_PROMPT_CACHE_TTL', 'CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL', 'FORCE_PROMPT_CACHING_5M', 'ENABLE_PROMPT_CACHING_1H'];
+
+// Pure: the extra environment for one job. Global --arm-env reaches xend-kind arms only (the
+// baseline arm must stay plain Claude Code); an arms-file entry's own env reaches its arm whatever
+// its kind, so a baseline arm can differ in a Claude Code setting such as the cache lifetime.
+function jobEnv(arm, opts, stateDir, allowedTools) {
+  const extraEnv = { XEND_STATE_DIR: stateDir };
+  if (arm.kind === 'xend') {
+    extraEnv.XEND_PROFILE = opts.profile;
+    // never let a benchmark depend on what happens to be installed on the runner
+    extraEnv.XEND_UPSTREAM_PONYTAIL = 'ignore';
+    if (opts.ponytail) extraEnv.XEND_PONYTAIL = opts.ponytail;
+    if (opts.ponytailText) extraEnv.XEND_PONYTAIL_TEXT = opts.ponytailText;
+    if (opts.ponytailStrict) extraEnv.XEND_PONYTAIL_STRICT = '1';
+    extraEnv.XEND_ARCHITECT = arm.mode === 'architect' ? '1' : '0';
+    // --allowedTools pre-approves Bash here, so Claude Code runs test commands without asking; the
+    // hooks cannot see CLI flags, so they get the same answer through the user-level opt-in
+    if (String(allowedTools || '').split(',').includes('Bash')) extraEnv.XEND_TRUST_TESTS = '1';
+    Object.assign(extraEnv, opts.arm_env || {});
+  }
+  if (arm.env) Object.assign(extraEnv, arm.env);
+  return extraEnv;
 }
 
 function runClaude(task, arm, opts, work, stateDir) {
@@ -178,21 +216,8 @@ function runClaude(task, arm, opts, work, stateDir) {
   if (opts.effort) args.push('--effort', opts.effort);
   if (arm.kind === 'xend') args.push('--plugin-dir', arm.pluginDir ? path.resolve(arm.pluginDir) : ROOT);
   for (const e of opts.extra) args.push(...e.split(' '));
-  const extraEnv = { XEND_STATE_DIR: stateDir };
-  if (arm.kind === 'xend') {
-    extraEnv.XEND_PROFILE = opts.profile;
-    // never let a benchmark depend on what happens to be installed on the runner
-    extraEnv.XEND_UPSTREAM_PONYTAIL = 'ignore';
-    if (opts.ponytail) extraEnv.XEND_PONYTAIL = opts.ponytail;
-    if (opts.ponytailText) extraEnv.XEND_PONYTAIL_TEXT = opts.ponytailText;
-    if (opts.ponytailStrict) extraEnv.XEND_PONYTAIL_STRICT = '1';
-    extraEnv.XEND_ARCHITECT = arm.mode === 'architect' ? '1' : '0';
-    // --allowedTools pre-approves Bash here, so Claude Code runs test commands without asking; the
-    // hooks cannot see CLI flags, so they get the same answer through the user-level opt-in
-    if (ta.allowedTools.split(',').includes('Bash')) extraEnv.XEND_TRUST_TESTS = '1';
-    Object.assign(extraEnv, opts.arm_env);
-    if (arm.env) Object.assign(extraEnv, arm.env);
-  }
+  if (arm.args) args.push(...arm.args);
+  const extraEnv = jobEnv(arm, opts, stateDir, ta.allowedTools);
   return new Promise((resolve) => {
     const started = Date.now();
     execFile('claude', args, { cwd: work, env: cleanEnv(extraEnv), timeout: (task.timeout_s || 600) * 1000, maxBuffer: 64 * 1024 * 1024 },
@@ -314,6 +339,9 @@ async function runJob(job, opts, outDir, workRoot) {
     cost_usd: j.total_cost_usd || 0,
     cost_main_usd: split.cost_main_usd, cost_sub_usd: split.cost_sub_usd,
     usage: { input: u.input_tokens || 0, cache_creation: u.cache_creation_input_tokens || 0, cache_read: u.cache_read_input_tokens || 0, output: u.output_tokens || 0 },
+    // which cache lifetime the writes were billed at (1h writes cost 2x input, 5m writes 1.25x)
+    cache_write_1h: (u.cache_creation && u.cache_creation.ephemeral_1h_input_tokens) || 0,
+    cache_write_5m: (u.cache_creation && u.cache_creation.ephemeral_5m_input_tokens) || 0,
     usage_all: all,
     total_tokens: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.output_tokens || 0),
     total_tokens_all: all.input + all.cache_creation + all.cache_read + all.output,
@@ -326,7 +354,8 @@ async function runJob(job, opts, outDir, workRoot) {
     ponytail: arm.kind === 'xend' ? (opts.ponytail || null) : null,
     ponytail_text: arm.kind === 'xend' && opts.ponytail !== 'off' ? (opts.ponytailText || null) : null,
     ponytail_strict: arm.kind === 'xend' ? !!opts.ponytailStrict : false,
-    arm_env: Object.assign({}, opts.arm_env || {}, arm.env || {}),
+    arm_env: Object.assign({}, arm.kind === 'xend' ? opts.arm_env || {} : {}, arm.env || {}),
+    arm_args: arm.args || null,
     answer_chars: (j.result || '').length,
     ts: new Date().toISOString(),
   };
@@ -347,6 +376,8 @@ async function pool(jobs, n, fn) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+  if (opts.help) { console.log(usage()); return; }
+  if (opts.error) { console.error(opts.error + ' (see --help); nothing was run'); process.exit(2); }
   opts.arm_env = parseArmEnv(opts.armEnv); // parsed once; applied to every xend-kind arm
   const tasks = loadTasks(opts.tasks, opts.category);
   if (opts.list) {
@@ -411,4 +442,4 @@ async function main() {
 function claudeVersion() { try { return execFileSync('claude', ['--version'], { timeout: 10000 }).toString().trim(); } catch (_) { return 'unknown'; } }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, normalizeArm, toolArgs, parseScore, splitCost, parseArmEnv, TOOLSETS };
+module.exports = { loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, normalizeArm, toolArgs, parseScore, splitCost, parseArmEnv, jobEnv, cleanEnv, TOOLSETS };
