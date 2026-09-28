@@ -69,6 +69,43 @@ test('project .xend.json overrides profile defaults and can switch profile', () 
   assert.ok(cfg.sources.some((s) => s.endsWith('.xend.json')));
 });
 
+test('a repository .xend.json cannot turn auto-test on, pick its command, trust it, or stretch its timeouts', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-cfg-'));
+  fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({
+    profile: 'lite', trustTestCommands: true,
+    autoTest: { enabled: true, command: 'pytest -p evil', timeoutMs: 600000, maxMs: 600000, maxChars: 800 },
+    architect: { verifyTimeoutMs: 900000 },
+  }));
+  const cfg = config.resolve({ env: {}, cwd: dir });
+  assert.strictEqual(cfg.autoTest.enabled, false, 'lite keeps auto-test off');
+  assert.strictEqual(cfg.autoTest.command, '');
+  assert.strictEqual(cfg.autoTest.timeoutMs, 20000);
+  assert.strictEqual(cfg.autoTest.maxMs, 8000);
+  assert.strictEqual(cfg.autoTest.maxChars, 800, 'harmless keys still apply');
+  assert.strictEqual(cfg.trustTestCommands, false);
+  assert.strictEqual(cfg.architect.verifyTimeoutMs, 120000);
+  assert.deepStrictEqual(cfg.ignoredProjectKeys.sort(), ['architect.verifyTimeoutMs', 'autoTest.command', 'autoTest.enabled', 'autoTest.maxMs', 'autoTest.timeoutMs', 'trustTestCommands']);
+  // turning it off is always allowed
+  fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify({ autoTest: { enabled: false } }));
+  assert.strictEqual(config.resolve({ env: {}, cwd: dir }).autoTest.enabled, false);
+});
+
+test('trustTestCommands comes from the environment or user config; timeouts are capped below the hook timeouts', () => {
+  assert.strictEqual(config.resolve({ env: {}, cwd: os.tmpdir() }).trustTestCommands, false);
+  assert.strictEqual(config.resolve({ env: { XEND_TRUST_TESTS: '1' }, cwd: os.tmpdir() }).trustTestCommands, true);
+  assert.strictEqual(config.resolve({ env: { XEND_TRUST_TESTS: '0' }, cwd: os.tmpdir() }).trustTestCommands, false);
+  const xdg = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-xdg-'));
+  fs.mkdirSync(path.join(xdg, 'xend'));
+  fs.writeFileSync(path.join(xdg, 'xend', 'config.json'), JSON.stringify({ trustTestCommands: true, autoTest: { timeoutMs: 600000 } }));
+  const saved = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = xdg;
+  try {
+    const cfg = config.resolve({ env: {}, cwd: os.tmpdir() });
+    assert.strictEqual(cfg.trustTestCommands, true);
+    assert.strictEqual(cfg.autoTest.timeoutMs, config.AUTOTEST_TIMEOUT_CAP_MS);
+  } finally { if (saved === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = saved; }
+});
+
 test('context block is stable and contains no timestamps', () => {
   const cfg = config.resolve({ env: {}, cwd: os.tmpdir() });
   const a = context.build(cfg, {});

@@ -3,12 +3,12 @@ name: ponytail
 description: Set the xend lean (ponytail) level for this session: lite, full, ultra, off, or rules.
 argument-hint: "[lite|full|ultra|off|rules|status]"
 disable-model-invocation: true
-allowed-tools: Bash(node *)
+allowed-tools: Bash(node *scripts/xend-cli.js*)
 ---
 
 Requested: `$ARGUMENTS` (empty means show the current level).
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" ponytail "${CLAUDE_SESSION_ID}" "${ARGUMENTS:-status}" 2>&1 || true`
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" ponytail "${CLAUDE_SESSION_ID}" $ARGUMENTS --data "${CLAUDE_PLUGIN_DATA}" 2>&1 || true`
 
 Apply the output above for the rest of the session, starting with your next reply.
 

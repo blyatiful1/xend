@@ -1,6 +1,10 @@
 'use strict';
 // Per-session state: shaped-output originals, dedupe registry, checkpoint, shaping log.
-// Location (first that applies): $XEND_STATE_DIR, $CLAUDE_PLUGIN_DATA/sessions/<id>, <tmpdir>/xend/<id>.
+// Location (first that applies): $XEND_STATE_DIR/<id>, the hook input's scratchpad_dir/xend,
+// $CLAUDE_PLUGIN_DATA/sessions/<id>, <tmpdir>/xend-<uid>/<id>. Hooks get CLAUDE_PLUGIN_DATA and
+// scratchpad_dir; the CLI, run from a skill through the Bash tool, gets neither, so SessionStart
+// records where each session's directory is (by-session pointers) and the CLI looks it up.
+// Directories are created 0700 and files 0600: saved tool output can hold secrets.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -10,11 +14,39 @@ function safeId(id) {
   return String(id || 'no-session').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80);
 }
 
+// A per-user name under the shared temp dir, so one user's state is never another's to read or
+// to plant a config in.
+function tmpBase() {
+  let uid = '';
+  try { uid = typeof process.getuid === 'function' ? String(process.getuid()) : os.userInfo().username; } catch (_) {}
+  const base = path.join(os.tmpdir(), uid ? 'xend-' + safeId(uid) : 'xend');
+  // someone else created it first (or made it a link): use a directory under our own home instead
+  try {
+    const st = fs.lstatSync(base);
+    if (st.isSymbolicLink() || (typeof process.getuid === 'function' && st.uid !== process.getuid())) return path.join(os.homedir(), '.cache', 'xend');
+  } catch (_) {}
+  return base;
+}
+
 function baseDir(env) {
   env = env || process.env;
   if (env.XEND_STATE_DIR) return env.XEND_STATE_DIR;
   if (env.CLAUDE_PLUGIN_DATA) return path.join(env.CLAUDE_PLUGIN_DATA, 'sessions');
-  return path.join(os.tmpdir(), 'xend');
+  return tmpBase();
+}
+
+// Every base a session's pointer may live under, most specific first.
+function pointerRoots(env) {
+  env = env || process.env;
+  const roots = [];
+  if (env.XEND_STATE_DIR) roots.push(env.XEND_STATE_DIR);
+  if (env.CLAUDE_PLUGIN_DATA) roots.push(path.join(env.CLAUDE_PLUGIN_DATA, 'sessions'));
+  roots.push(tmpBase());
+  return roots.filter((r, i) => roots.indexOf(r) === i);
+}
+
+function mkdirPrivate(d) {
+  try { fs.mkdirSync(d, { recursive: true, mode: 0o700 }); } catch (_) {}
 }
 
 // scratchpadDir: Claude Code's per-session scratch directory from the hook input when present
@@ -25,8 +57,24 @@ function sessionDir(sessionId, env, scratchpadDir) {
   if (env.XEND_STATE_DIR) d = path.join(env.XEND_STATE_DIR, safeId(sessionId));
   else if (scratchpadDir) d = path.join(scratchpadDir, 'xend');
   else d = path.join(baseDir(env), safeId(sessionId));
-  try { fs.mkdirSync(d, { recursive: true }); } catch (_) {}
+  mkdirPrivate(d);
   return d;
+}
+
+// The state dir hooks use for this session, found from outside a hook: the by-session pointer
+// SessionStart wrote, else an existing <base>/<id> directory. null when neither exists.
+function findSessionDir(sessionId, env) {
+  if (!sessionId) return null;
+  const roots = pointerRoots(env);
+  for (const root of roots) {
+    const p = readJson(path.join(root, 'by-session', safeId(sessionId) + '.json'), null);
+    if (p && p.dir && fs.existsSync(p.dir)) return p.dir;
+  }
+  for (const root of roots) {
+    const d = path.join(root, safeId(sessionId));
+    if (fs.existsSync(d)) return d;
+  }
+  return null;
 }
 
 function readJson(file, fallback) {
@@ -36,14 +84,14 @@ function readJson(file, fallback) {
 function writeJson(file, obj) {
   try {
     const tmp = file + '.' + process.pid + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(obj));
+    fs.writeFileSync(tmp, JSON.stringify(obj), { mode: 0o600 });
     fs.renameSync(tmp, file);
     return true;
   } catch (_) { return false; }
 }
 
 function appendLine(file, line) {
-  try { fs.appendFileSync(file, line + '\n'); } catch (_) {}
+  try { fs.appendFileSync(file, line + '\n', { mode: 0o600 }); } catch (_) {}
 }
 
 function hash(s) { return crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 16); }
@@ -52,7 +100,7 @@ function hash(s) { return crypto.createHash('sha1').update(String(s)).digest('he
 function persistOriginal(dir, toolUseId, text) {
   try {
     const f = path.join(dir, 'tool-' + safeId(toolUseId) + '.txt');
-    fs.writeFileSync(f, text);
+    fs.writeFileSync(f, text, { mode: 0o600 });
     return f;
   } catch (_) { return null; }
 }
@@ -67,6 +115,13 @@ function pruneOld(env, maxAgeDays) {
   for (const e of entries.slice(0, 500)) {
     const p = path.join(root, e);
     try {
+      if (e === 'by-session' || e === 'by-cwd') {
+        for (const f of fs.readdirSync(p).slice(0, 2000)) {
+          const fp = path.join(p, f);
+          if (fs.statSync(fp).mtimeMs < cutoff) { fs.rmSync(fp, { force: true }); removed++; }
+        }
+        continue;
+      }
       const st = fs.statSync(p);
       if (st.isDirectory() && st.mtimeMs < cutoff) { fs.rmSync(p, { recursive: true, force: true }); removed++; }
     } catch (_) {}
@@ -81,11 +136,15 @@ function writeSessionPointers(env, sessionId, dir, cwd) {
   try {
     const root = baseDir(env);
     const payload = { id: sessionId, dir, cwd: cwd || '' };
-    fs.mkdirSync(root, { recursive: true });
+    mkdirPrivate(root);
     writeJson(path.join(root, 'latest-session.json'), payload);
+    if (sessionId) {
+      mkdirPrivate(path.join(root, 'by-session'));
+      writeJson(path.join(root, 'by-session', safeId(sessionId) + '.json'), payload);
+    }
     if (cwd) {
       const cwdDir = path.join(root, 'by-cwd');
-      fs.mkdirSync(cwdDir, { recursive: true });
+      mkdirPrivate(cwdDir);
       const key = crypto.createHash('sha1').update(String(cwd)).digest('hex');
       writeJson(path.join(cwdDir, key + '.json'), payload);
     }
@@ -101,12 +160,12 @@ function resolveSessionDir(opts) {
   const env = opts.env || process.env;
   const cwd = opts.cwd || process.cwd();
   if (opts.session) {
-    return { dir: sessionDir(opts.session, env), id: opts.session, source: 'arg' };
+    return { dir: findSessionDir(opts.session, env) || sessionDir(opts.session, env), id: opts.session, source: 'arg' };
   }
   const envId = env.CLAUDE_SESSION_ID || env.CLAUDE_CODE_SESSION_ID;
   if (envId) {
-    const dir = path.join(baseDir(env), safeId(envId));
-    if (fs.existsSync(dir)) return { dir, id: envId, source: 'env' };
+    const dir = findSessionDir(envId, env);
+    if (dir) return { dir, id: envId, source: 'env' };
   }
   const root = baseDir(env);
   if (cwd) {
@@ -127,4 +186,4 @@ function setSessionOverride(dir, key, value) {
   return writeJson(path.join(dir, 'session.json'), cur);
 }
 
-module.exports = { baseDir, sessionDir, readJson, writeJson, appendLine, hash, persistOriginal, pruneOld, sessionOverrides, setSessionOverride, safeId, writeSessionPointers, resolveSessionDir };
+module.exports = { baseDir, tmpBase, pointerRoots, findSessionDir, sessionDir, readJson, writeJson, appendLine, hash, persistOriginal, pruneOld, sessionOverrides, setSessionOverride, safeId, writeSessionPointers, resolveSessionDir };

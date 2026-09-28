@@ -27,6 +27,7 @@ function main() {
   if (overrides.ponytail) cfg.ponytail = overrides.ponytail;
   if (overrides.ponytailText) cfg.ponytailText = overrides.ponytailText;
   if (overrides.architect === false) cfg.architect = Object.assign({}, cfg.architect, { enabled: false });
+  if (overrides.architect === true) cfg.architect = Object.assign({}, cfg.architect, { enabled: true });
   if (overrides.enabled === false) return;
   const source = input.source || 'startup';
   const opts = { cliPath: path.join(__dirname, 'xend-cli.js') };

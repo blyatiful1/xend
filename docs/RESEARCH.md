@@ -232,7 +232,13 @@ unchanged — PASS on all three gates**. The four bugfix tasks went from 4.0-4.2
 previous release) to 3.0-3.1 (every run with it on, r8/r10/r11). → Quality risk: the model trusts a partial result (the suite
 xend chose, not the one the task names); every note names its command, and a pass on the wrong suite
 is the failure mode to watch for. → **Grade B** (own paired measurement, one environment). → Status:
-on in `balanced` and `aggressive`, off in `lite`.
+on in `balanced` and `aggressive`, off in `lite`. **Scope (0.3.0):** the saving above was measured
+with Bash pre-approved (the bench's `--allowedTools`). A test command runs the repository's own
+code, and a hook cannot show a permission prompt, so since 0.3.0 the hook runs it only where Claude
+Code would run it without asking (an allow rule, `bypassPermissions`, or the user-level
+`trustTestCommands`); the bench sets `XEND_TRUST_TESTS=1` exactly when it pre-approves Bash. A
+session with no allow rule for the test command gets no auto-test, and so none of this saving,
+until the user approves the command once.
 
 **H25. A benchmark run from inside a hosted session measures the host, not the plugin.** Three
 confounds found and removed in this round *(verified here with a request-logging proxy)*: (1) a

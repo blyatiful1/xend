@@ -7,8 +7,12 @@ const fs = require('fs');
 const path = require('path');
 const config = require('./lib/config.js');
 const io = require('./lib/io.js');
+const permissions = require('./lib/permissions.js');
 const state = require('./lib/state.js');
 const verify = require('./lib/verify.js');
+
+// below this hook's own 180 s timeout in hooks/hooks.json, so a slow check is reported, not killed
+const VERIFY_TIMEOUT_CAP_MS = 170000;
 
 function envDisabled(v) {
   return v !== undefined && /^(0|false|off)$/i.test(String(v));
@@ -25,10 +29,18 @@ function main() {
   if (envDisabled(process.env.XEND_VERIFY)) return;
 
   const cwd = input.cwd || process.cwd();
+  let kind = verify.agentKind(input.agent_type);
+
+  // Only xend's own agents, and builders dispatched for a task of this session's plan, are
+  // verified. Any other subagent (Explore, general-purpose, another plugin's) returns here, before
+  // any wait or file read: most sessions have no plan at all.
+  const planPath = path.join(dir, 'plan.json');
+  const plan = state.readJson(planPath, null);
+  const hasPlan = !!(plan && Array.isArray(plan.tasks) && plan.tasks.length);
+  if (!kind && !hasPlan) return;
+
   const agentTranscript = input.agent_transcript_path;
   const transcriptExists = !!agentTranscript && fs.existsSync(agentTranscript);
-
-  let kind = verify.agentKind(input.agent_type);
 
   let text = typeof input.last_assistant_message === 'string' && input.last_assistant_message
     ? input.last_assistant_message
@@ -49,9 +61,9 @@ function main() {
   if (reply.task) {
     taskId = reply.task;
     lookup = 'reply';
-  } else {
+  } else if (hasPlan) {
     let launch = input.agent_id ? verify.lookupLaunch(dir, input.agent_id) : null;
-    for (let tries = 0; !launch && tries < 3; tries++) {
+    for (let tries = 0; !launch && input.agent_id && tries < 3; tries++) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
       launch = verify.lookupLaunch(dir, input.agent_id);
     }
@@ -64,15 +76,14 @@ function main() {
     }
   }
 
+  // The plan task's own verify command is the contract and wins over the builder's stated one.
+  const task = (taskId && hasPlan) ? plan.tasks.find((t) => t.id === taskId) : null;
+
   if (!kind) {
-    if (!taskId) return; // not an xend agent and no [xend task <id>] tag to treat it as a worker
+    // not an xend agent: treated as a builder only when its task id names a task of this plan
+    if (!task) return;
     kind = 'worker';
   }
-
-  // The plan task's own verify command is the contract and wins over the builder's stated one.
-  const planPath = path.join(dir, 'plan.json');
-  const plan = state.readJson(planPath, null);
-  const task = (taskId && plan && Array.isArray(plan.tasks)) ? plan.tasks.find((t) => t.id === taskId) : null;
 
   const isWorkerKind = kind === 'worker' || kind === 'worker-lite';
 
@@ -82,15 +93,25 @@ function main() {
   const citeResult = verify.checkCitations(citations, cwd, readerEvidence);
 
   let claimed = null, command = null, exit = null, ms = 0, stdout = '', stderr = '', malformed = false, allowed = false;
+  let skipped = null, hint = null;
   if (isWorkerKind) {
     claimed = reply.result;
     malformed = !reply.result || (reply.command === null && reply.summary === null);
     command = (task && task.verify) ? task.verify : reply.command;
     if (!malformed && command) {
       allowed = verify.commandAllowed(command);
-      if (allowed) {
-        const run = verify.runVerify(command, cwd, arch.verifyTimeoutMs || 120000);
-        exit = run.exit; ms = run.ms; stdout = run.stdout; stderr = run.stderr;
+      if (!allowed) skipped = 'not-allowlisted';
+      else {
+        // no prompt can be shown from here: run only what Claude Code would run without asking
+        const perm = permissions.check(command, { cwd, permissionMode: input.permission_mode, trusted: cfg.trustTestCommands === true });
+        if (!perm.ok) {
+          allowed = false; skipped = perm.reason;
+          hint = permissions.hintOnce(dir, command, perm, 'xend could not re-run a builder\'s check');
+        } else {
+          const timeout = Math.min(arch.verifyTimeoutMs || 120000, VERIFY_TIMEOUT_CAP_MS);
+          const run = verify.runVerify(command, cwd, timeout);
+          exit = run.exit; ms = run.ms; stdout = run.stdout; stderr = run.stderr;
+        }
       }
     }
   }
@@ -139,13 +160,15 @@ function main() {
     command: command || null,
     exit,
     ms,
+    skipped,
     blocked,
     checked: citeResult.checked,
     bad: citeResult.bad.length,
     scope: scopeForRecord,
   }));
 
-  if (blocked) io.writeHookOutput({ decision: 'block', reason });
+  if (blocked) io.writeHookOutput(Object.assign({ decision: 'block', reason }, hint ? { systemMessage: hint } : {}));
+  else if (hint) io.writeHookOutput({ systemMessage: hint });
 }
 
 try { main(); } catch (e) { io.debug('subagent-stop error: ' + (e && e.stack || e)); }

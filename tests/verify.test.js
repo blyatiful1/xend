@@ -323,6 +323,64 @@ test('commandAllowed: rejects an import smoke check that does anything beyond th
   }
 });
 
+test('commandAllowed: accepts the flags real test and lint runs use', () => {
+  for (const cmd of [
+    'python3 -m pytest -q --tb=no -rfE -p no:cacheprovider',
+    'pytest -k "parse and not slow" tests/test_x.py::test_y -x',
+    'python3 -m unittest discover -s tests -p "test*.py"',
+    'npm test --silent',
+    'npm test -- --runInBand --watch=false',
+    'node --test --test-reporter=spec',
+    'go test -run TestX -count=1 ./...',
+    'cargo test --workspace -- --nocapture',
+    'ruff check src tests',
+    'tsc --noEmit -p tsconfig.json',
+  ]) {
+    assert.equal(verify.commandAllowed(cmd), true, cmd);
+  }
+});
+
+test('commandAllowed: rejects newlines, expansions and flags that write, delete or load outside the test run', () => {
+  for (const cmd of [
+    'npm test\ntouch X',
+    'npm test\r\ntouch X',
+    'pytest -q --basetemp=$HOME',
+    'pytest -q --basetemp=/home/someone',
+    'pytest -q --basetemp=build/tmp',
+    'pytest ~/elsewhere',
+    'pytest ../outside/tests',
+    'pytest -p evil_plugin',
+    'pytest -c /etc/evil.ini',
+    'pytest -o cache_dir=/tmp/x',
+    'pytest --rootdir=/',
+    'pytest --junitxml=report.xml',
+    'go test -exec /bin/sh ./...',
+    'npm test --script-shell=/bin/evil',
+    'node --test --require /tmp/x.js',
+    'eslint --fix src',
+    'make test SHELL=/bin/evil',
+    'pytest-evil -q',
+    './../outside-test.sh',
+    'make test -i',
+    'pytest --collect-only',
+    'npm test --if-present',
+    'node --test --test-only',
+    'npm test -- --passWithNoTests',
+    'npm test -- --watch',
+    'pytest "unterminated',
+    'pytest \\ -q',
+  ]) {
+    assert.equal(verify.commandAllowed(cmd), false, JSON.stringify(cmd));
+  }
+});
+
+test('parseCommand: words and simple quotes, no expansion', () => {
+  assert.deepEqual(verify.parseCommand('pytest -k "a and b" x.py'), ['pytest', '-k', 'a and b', 'x.py']);
+  assert.deepEqual(verify.parseCommand("python3 -c 'import os'"), ['python3', '-c', 'import os']);
+  assert.equal(verify.parseCommand('pytest $HOME'), null);
+  assert.equal(verify.parseCommand('  '), null);
+});
+
 // ============================================================================
 // runVerify
 // ============================================================================
@@ -336,6 +394,19 @@ test('runVerify: captures exit code and stdout for a real subprocess', () => {
 
   const failing = verify.runVerify('node -e "process.exit(3)"', process.cwd(), 5000);
   assert.equal(failing.exit, 3);
+});
+
+test('runVerify: runs without a shell; a missing program is exit 127, a shell-looking command is never run', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-rv-'));
+  const missing = verify.runVerify('definitely-not-a-real-program-xend --x', d, 5000);
+  assert.equal(missing.exit, 127);
+  assert.match(missing.stderr, /command not found/);
+  const refused = verify.runVerify('node -e "1"\ntouch SENTINEL', d, 5000);
+  assert.equal(refused.exit, 126);
+  assert.equal(fs.existsSync(path.join(d, 'SENTINEL')), false);
+  // "$HOME" reaches the program as literal text: no shell expands it
+  const lit = verify.runVerify("node -e 'console.log(process.argv[1])' literal", d, 5000);
+  assert.equal(lit.stdout.trim(), 'literal');
 });
 
 // ============================================================================
@@ -609,14 +680,22 @@ test('recordLaunch: caps the registry at the 200 most recent entries', () => {
 // end-to-end: node scripts/subagent-stop.js (and scripts/agent-launch.js)
 // ============================================================================
 
+// No user or managed settings from the machine running the tests: permission rules come only
+// from what each test writes.
+const HERMETIC_ENV = {
+  CLAUDE_CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-verify-home-')),
+  XEND_MANAGED_SETTINGS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-verify-managed-')),
+};
+
 function runHook(scriptPath, input, env) {
   // Strip NODE_TEST_CONTEXT: this test suite itself runs under `node --test`, and that env var
   // would otherwise leak into a fixture's own `node --test ...` verify command (run as a
   // grandchild by scripts/lib/verify.js's runVerify), making it behave as a v8-serialized child
   // reporter instead of a normal process. Production hook invocations never run inside a test
   // runner, so this only matters for the fixtures here.
-  const childEnv = Object.assign({}, process.env, env);
+  const childEnv = Object.assign({}, process.env, HERMETIC_ENV, env);
   delete childEnv.NODE_TEST_CONTEXT;
+  delete childEnv.CLAUDE_PROJECT_DIR;
   return spawnSync(process.execPath, [scriptPath], {
     input: JSON.stringify(input),
     encoding: 'utf8',
@@ -636,9 +715,12 @@ function stateDirFor(stateBase, sessionId) {
   return path.join(stateBase, sessionId);
 }
 
-function writeSessionSetup(dir, planTasks) {
+// trust: the user-level opt-in (trustTestCommands) that lets hooks run test commands without an
+// allow rule; on by default here so the verifier's own behaviour can be tested.
+function writeSessionSetup(dir, planTasks, opts) {
+  const trust = !opts || opts.trust !== false;
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ architect: { verify: true, blockOnMismatch: true, verifyTimeoutMs: 10000 } }));
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ trustTestCommands: trust, architect: { verify: true, blockOnMismatch: true, verifyTimeoutMs: 10000 } }));
   fs.writeFileSync(path.join(dir, 'plan.json'), JSON.stringify({ goal: 'g', verify: 'npm test', tasks: planTasks }));
 }
 
@@ -776,6 +858,94 @@ test('e2e (d): a command containing ";" is never executed', () => {
     assert.equal(rec.claimed, 'PASS');
     assert.equal(rec.blocked, false); // unverifiable is never blocked
     assert.equal(rec.lookup, 'transcript');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(stateBase, { recursive: true, force: true });
+  }
+});
+
+function sentinelTask(cwd, id) {
+  // an allowlisted verify command whose only effect is to create SENTINEL: proof it ran
+  writeFileDeep(path.join(cwd, 'tests', 'sentinel.test.js'), "require('fs').writeFileSync('SENTINEL', '1');\n");
+  return { id, title: 't', tier: 'worker', files: ['src/thing.py'], testFiles: [], deps: [],
+    spec: 's', verify: 'node tests/sentinel.test.js', status: 'todo', attempts: 0, verified: false, lastVerdict: '', scopeWarnings: [] };
+}
+
+test('e2e: with no allow rule, no trust and no bypass, a builder\'s check is not run and the user gets one note', () => {
+  const { cwd, stateBase } = setupProject();
+  try {
+    const dir = stateDirFor(stateBase, 'sess-perm');
+    writeSessionSetup(dir, [sentinelTask(cwd, 'T1')], { trust: false });
+    const input = {
+      session_id: 'sess-perm', cwd, agent_id: 'agent-p', agent_type: 'xend:xend-worker',
+      last_assistant_message: passReplyTextWithTask('T1', 'echo unused'), stop_hook_active: false,
+    };
+    const res = runHook(SUBAGENT_STOP, input, { XEND_STATE_DIR: stateBase });
+    assert.equal(fs.existsSync(path.join(cwd, 'SENTINEL')), false, 'must not run without permission');
+    const out = JSON.parse(res.stdout);
+    assert.match(out.systemMessage, /Bash\(node tests\/sentinel\.test\.js:\*\)/);
+    const rec = JSON.parse(fs.readFileSync(path.join(dir, 'verify.jsonl'), 'utf8').trim().split('\n').pop());
+    assert.equal(rec.verdict, 'unverifiable');
+    assert.equal(rec.skipped, 'no-rule');
+    // the note is shown once per session
+    const again = runHook(SUBAGENT_STOP, input, { XEND_STATE_DIR: stateBase });
+    assert.equal((again.stdout || '').trim(), '');
+
+    // bypassPermissions mode: Claude Code would run it without asking, so xend does too
+    runHook(SUBAGENT_STOP, Object.assign({}, input, { permission_mode: 'bypassPermissions' }), { XEND_STATE_DIR: stateBase });
+    assert.equal(fs.existsSync(path.join(cwd, 'SENTINEL')), true);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(stateBase, { recursive: true, force: true });
+  }
+});
+
+test('e2e: an allow rule lets the check run; a deny rule wins even over trust', () => {
+  for (const [key, trust, runs] of [['allow', false, true], ['deny', true, false], ['ask', true, false]]) {
+    const { cwd, stateBase } = setupProject();
+    try {
+      const dir = stateDirFor(stateBase, 'sess-rule');
+      writeSessionSetup(dir, [sentinelTask(cwd, 'T1')], { trust });
+      writeFileDeep(path.join(cwd, '.claude', 'settings.json'), JSON.stringify({ permissions: { [key]: ['Bash(node tests/sentinel.test.js)'] } }));
+      runHook(SUBAGENT_STOP, {
+        session_id: 'sess-rule', cwd, agent_id: 'agent-r', agent_type: 'xend:xend-worker',
+        last_assistant_message: passReplyTextWithTask('T1', 'echo unused'), stop_hook_active: false,
+      }, { XEND_STATE_DIR: stateBase });
+      assert.equal(fs.existsSync(path.join(cwd, 'SENTINEL')), runs, key);
+      const rec = JSON.parse(fs.readFileSync(path.join(dir, 'verify.jsonl'), 'utf8').trim().split('\n').pop());
+      assert.equal(rec.skipped, runs ? null : key, key);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+      fs.rmSync(stateBase, { recursive: true, force: true });
+    }
+  }
+});
+
+test('e2e: a non-xend agent is ignored without any wait when the session has no plan, even with a Task: line', () => {
+  const { cwd, stateBase } = setupProject();
+  try {
+    const dir = stateDirFor(stateBase, 'sess-noplan');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ trustTestCommands: true, architect: { verify: true } }));
+    writeFileDeep(path.join(cwd, 'tests', 'sentinel.test.js'), "require('fs').writeFileSync('SENTINEL', '1');\n");
+    const started = Date.now();
+    const res = runHook(SUBAGENT_STOP, {
+      session_id: 'sess-noplan', cwd, agent_id: 'agent-gp', agent_type: 'general-purpose',
+      last_assistant_message: passReplyTextWithTask('T1', 'node tests/sentinel.test.js'), stop_hook_active: false,
+    }, { XEND_STATE_DIR: stateBase });
+    const elapsed = Date.now() - started;
+    assert.equal((res.stdout || '').trim(), '');
+    assert.equal(fs.existsSync(path.join(cwd, 'SENTINEL')), false);
+    assert.equal(fs.existsSync(path.join(dir, 'verify.jsonl')), false);
+    assert.ok(elapsed < 450, 'no registry wait expected, took ' + elapsed + 'ms');
+
+    // with a plan, a Task: id that is not one of its tasks is ignored as well
+    writeSessionSetup(dir, [sentinelTask(cwd, 'T7')]);
+    runHook(SUBAGENT_STOP, {
+      session_id: 'sess-noplan', cwd, agent_id: 'agent-gp2', agent_type: 'general-purpose',
+      last_assistant_message: passReplyTextWithTask('T1', 'node tests/sentinel.test.js'), stop_hook_active: false,
+    }, { XEND_STATE_DIR: stateBase });
+    assert.equal(fs.existsSync(path.join(cwd, 'SENTINEL')), false);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
     fs.rmSync(stateBase, { recursive: true, force: true });

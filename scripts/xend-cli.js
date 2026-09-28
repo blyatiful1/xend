@@ -10,6 +10,7 @@
 //   node xend-cli.js ponytail <session-id> [arg]  switch the lean level, or 'rules' / 'status'
 //   node xend-cli.js outline <file> [--max N]     print a heuristic outline of a file
 //   node xend-cli.js plan <sub> [args] [--session <id>] [--file <path>]
+//   any command also takes --data <dir>: the plugin data dir (skills pass ${CLAUDE_PLUGIN_DATA})
 //       set               validate + write a plan (JSON via --file or stdin)
 //       status            print per-task status, the verify command, scope warnings
 //       next [--peek]     print ready briefs to dispatch; --peek: no state change
@@ -28,7 +29,24 @@ const ponytail = require('./lib/ponytail.js');
 const plan = require('./lib/plan.js');
 const shape = require('./lib/shape.js');
 
+// --data <dir>: the plugin's data directory, which skills pass as the substituted
+// ${CLAUDE_PLUGIN_DATA} because the Bash tool that runs them does not have it in its environment.
+// With it, the CLI finds the same session state the hooks write. Taken out of argv before
+// anything else parses it; ignored when empty or unsubstituted.
+(function takeDataArg() {
+  const i = process.argv.indexOf('--data');
+  if (i === -1) return;
+  const v = process.argv[i + 1];
+  process.argv.splice(i, 2);
+  if (v && !v.includes('${') && path.isAbsolute(v)) process.env.CLAUDE_PLUGIN_DATA = v;
+})();
+
 function arg(name) { const i = process.argv.indexOf(name); return i !== -1 ? process.argv[i + 1] : undefined; }
+
+// The state dir the hooks use for this session (see state.findSessionDir), else a new one.
+function cliSessionDir(sid) {
+  return state.findSessionDir(sid) || state.sessionDir(sid);
+}
 
 
 function textLabel(cfg) {
@@ -36,7 +54,7 @@ function textLabel(cfg) {
 }
 
 function sessionPonytail(sid, cwd) {
-  const dir = state.sessionDir(sid);
+  const dir = cliSessionDir(sid);
   const cfg = config.resolve({ cwd });
   const sess = state.sessionOverrides(dir);
   if (sess.ponytail) cfg.ponytail = sess.ponytail;
@@ -55,7 +73,7 @@ function ponytailStatus(s) {
     'owner: ' + (s.owns.upstreamOwns ? 'ponytail plugin (xend defers; use /ponytail <level>)' : 'xend'),
     'text: ' + textLabel(s.cfg) + (p.strict ? ', strict (no xend bridging text)' : ''),
     'upstream: ' + (s.pt.installed ? 'installed via ' + s.pt.channel + (s.pt.version ? ' v' + s.pt.version : '') + (s.pt.root ? ' at ' + s.pt.root : '') + ', injecting=' + s.pt.injecting + ', mode=' + s.pt.mode : 'no evidence found'),
-    'session block: ' + Buffer.byteLength(block) + ' B (~' + Math.round(Buffer.byteLength(block) / 3.8) + ' tok)',
+    'session block: ' + Buffer.byteLength(block) + ' B (~' + Math.round(Buffer.byteLength(block) / 2.7) + ' tok)',
     'evidence: ' + s.pt.evidence.join('; '),
   ];
   console.log(lines.join('\n'));
@@ -228,12 +246,19 @@ function main() {
       return;
     }
     case 'state-dir': {
-      console.log(state.sessionDir(rest[0]));
+      console.log(cliSessionDir(rest[0]));
       return;
     }
     case 'set': {
       const [sid, key, value] = rest;
-      const dir = state.sessionDir(sid);
+      const dir = cliSessionDir(sid);
+      if (value === undefined || value === '') {
+        // no value: show the current one (a skill run with no argument)
+        const cur = state.sessionOverrides(dir)[key];
+        const cfg = state.readJson(path.join(dir, 'config.json'), null) || config.resolve({ cwd });
+        console.log(key + ': ' + JSON.stringify(cur !== undefined ? cur : cfg[key]) + (cur !== undefined ? ' (session override)' : ''));
+        return;
+      }
       let v = value;
       if (value === 'true' || value === 'on') v = true;
       else if (value === 'false' || value === 'off') v = false;
@@ -276,7 +301,9 @@ function main() {
       return;
     }
     case 'plan': {
-      const [sub, ...planArgs] = rest;
+      let [sub, ...planArgs] = rest;
+      // no subcommand (a skill run with no argument, or only options): status
+      if (!sub || sub.startsWith('-')) { if (sub) planArgs.unshift(sub); sub = 'status'; }
       planCommand(sub, planArgs, cwd);
       return;
     }
@@ -297,7 +324,7 @@ function main() {
     }
     case 'note': {
       const [sid, ...words] = rest;
-      const dir = state.sessionDir(sid);
+      const dir = cliSessionDir(sid);
       const f = path.join(dir, 'checkpoint.md');
       let cur = '';
       try { cur = fs.readFileSync(f, 'utf8'); } catch (_) { cur = '# xend checkpoint\n'; }

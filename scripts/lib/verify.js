@@ -175,18 +175,115 @@ function parseWorkerReply(text) {
 
 const ALLOWLIST_RE = /^(python3?\s+-m\s+(pytest|unittest)|pytest|npm\s+(run\s+)?test|pnpm\s+(run\s+)?test|yarn\s+(run\s+)?test|node\s+--test|go\s+test|cargo\s+(test|check)|make\s+(test|check)|bash\s+[\w./-]*test[\w./-]*\.sh|\.\/[\w./-]*test[\w./-]*\.sh|ruff|eslint|tsc|mypy|node\s+[\w./-]+\.test\.js)\b/;
 // An import smoke check: `python3 -c "import a.b"` or `python -c 'import a.b, c.d'`, one or more
-// dotted module names, one quote style used consistently, nothing else in the string.
-const IMPORT_SMOKE_RE = /^python3?\s+-c\s+(["'])import\s+[\w.]+(?:\s*,\s*[\w.]+)*\1$/;
-// The allowlist's own "|" characters above are regex alternation, not shell pipes; a command
-// still needs no shell metacharacters at all to run.
-const FORBIDDEN_RE = /[;&|<>`]|\$\(/;
+// dotted module names, nothing else.
+const IMPORT_SMOKE_RE = /^import\s+[\w.]+(?:\s*,\s*[\w.]+)*$/;
+// Commands run without a shell (see runVerify), so these would only ever reach a runner as literal
+// text; they are refused anyway, so that no command that looks like shell syntax is ever run.
+const FORBIDDEN_RE = /[;&|<>`$\\\n\r%^]/;
+
+// Flags a verify or test command may carry. Anything else makes the command unverifiable rather
+// than run: --basetemp, --rootdir, -c, -o, --junitxml, -exec, --script-shell, -r/--require, --fix,
+// --outDir can delete, write or load files outside the test run, and --collect-only, --test-only,
+// --passWithNoTests, --if-present or make's -i would let a check "pass" without running tests.
+const SAFE_FLAGS = new Set([
+  // pytest / unittest
+  '-q', '-qq', '-v', '-vv', '-vvv', '-x', '-s', '-l', '-k', '-m', '-p', '-W', '-n', '-t', '-b',
+  '--tb', '--maxfail', '--lf', '--last-failed', '--ff', '--failed-first', '--nf', '--new-first', '--sw',
+  '--stepwise', '--no-header', '--no-summary', '--disable-warnings', '--durations',
+  '--durations-min', '--strict-markers', '--strict-config', '--runxfail', '--color', '--capture', '--showlocals',
+  '--exitfirst', '--quiet', '--verbose', '--import-mode', '--timeout', '--locals', '--failfast', '--buffer',
+  // node --test
+  '--test', '--test-reporter', '--test-name-pattern', '--test-concurrency', '--test-timeout', '--test-force-exit',
+  // npm / pnpm / yarn, and common runner flags passed after `--`
+  '--', '--silent', '--runInBand', '--ci', '--bail', '--testNamePattern', '--grep', '-g', '--reporter',
+  '--watch', '--watchAll', '--run', // --watch and --watchAll only as =false (see argsSafe)
+  // go test
+  '-run', '-count', '-race', '-short', '-timeout', '-cover', '-failfast', '-bench', '-tags', '-vet', '-json',
+  // cargo
+  '--lib', '--bins', '--bin', '--tests', '--examples', '--all', '--workspace', '--package', '--no-fail-fast',
+  '--release', '--features', '-F', '--all-features', '--no-default-features', '--all-targets', '--locked',
+  '--offline', '--frozen', '--nocapture', '--test-threads', '--exact', '--ignored', '--include-ignored',
+  '--show-output', '-j', '--jobs',
+  // make
+  '-k', '--keep-going',
+  // linters and type checkers (never --fix / --write / --outDir)
+  '--check', '--diff', '--select', '--ignore', '--extend-select', '--no-cache', '--output-format', '--statistics',
+  '--max-warnings', '--ext', '--no-warn-ignored', '--noEmit', '--project', '--pretty', '--skipLibCheck', '--strict',
+  '--ignore-missing-imports', '--no-error-summary', '--check-untyped-defs', '--python-version', '--no-incremental',
+  '--show-error-codes', '--follow-imports',
+]);
+
+// Splits a command into argv: whitespace-separated words, '...' and "..." quoting (no escapes,
+// no expansion). null when it is empty, unbalanced, or contains a FORBIDDEN_RE character.
+function parseCommand(cmd) {
+  if (typeof cmd !== 'string') return null;
+  const s = cmd.trim();
+  if (!s || FORBIDDEN_RE.test(s)) return null;
+  const argv = [];
+  let cur = null, quote = null;
+  for (const ch of s) {
+    if (quote) {
+      if (ch === quote) quote = null; else cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch; if (cur === null) cur = '';
+    } else if (/\s/.test(ch)) {
+      if (cur !== null) { argv.push(cur); cur = null; }
+    } else {
+      cur = (cur === null ? '' : cur) + ch;
+    }
+  }
+  if (quote) return null;
+  if (cur !== null) argv.push(cur);
+  return argv.length ? argv : null;
+}
+
+// A value that names a file must stay inside the project: relative, no "..", no "~".
+function pathSafe(v) {
+  const s = String(v);
+  if (/^[\\/~]/.test(s) || /^[A-Za-z]:/.test(s)) return false;
+  return !/(^|[\\/])\.\.([\\/]|$)/.test(s);
+}
+
+// Every word after the runner must be a SAFE_FLAGS flag (value after "=" path-checked), pytest's
+// -r<chars> report switch, or a path-safe positional; a positional holding "=" is only accepted as
+// a flag's value. Under Python, `-p` loads a plugin module, so there it only takes "no:<plugin>"
+// or a glob pattern (unittest's -p); tsc and cargo use -p for a project path or package name.
+function argsSafe(argv, runner) {
+  const python = /^(pytest|python3?)$/.test(runner || '');
+  let prevFlag = null;
+  for (const a of argv) {
+    if (a.startsWith('-') && a.length > 1 && !/^-\d/.test(a)) {
+      const eq = a.indexOf('=');
+      const name = eq === -1 ? a : a.slice(0, eq);
+      if (python && /^-r[a-zA-Z]+$/.test(a)) { prevFlag = null; continue; }
+      if ((name === '--watch' || name === '--watchAll') && a !== name + '=false') return false;
+      if (python && name.startsWith('-p') && name !== '-p' && !name.startsWith('--')) { if (!/^-pno:[\w.-]+$/.test(a)) return false; prevFlag = null; continue; }
+      if (!SAFE_FLAGS.has(name)) return false;
+      if (eq !== -1 && !pathSafe(a.slice(eq + 1))) return false;
+      prevFlag = eq === -1 ? name : null;
+      continue;
+    }
+    if (python && prevFlag === '-p' && !/^no:[\w.-]+$/.test(a) && !a.includes('*')) return false;
+    if (a.includes('=') && !prevFlag) return false;
+    if (!pathSafe(a)) return false;
+    prevFlag = null;
+  }
+  return true;
+}
+
+// The program itself: one of the runners by name, or a project-relative ./...test...sh script.
+const RUNNER_RE = /^(pytest|python3?|npm|pnpm|yarn|node|go|cargo|make|bash|ruff|eslint|tsc|mypy)$/;
+const SCRIPT_RE = /^\.\/[\w./-]*test[\w./-]*\.sh$/;
 
 function commandAllowed(cmd) {
-  if (typeof cmd !== 'string') return false;
-  const trimmed = cmd.trim();
-  if (!trimmed) return false;
-  if (FORBIDDEN_RE.test(trimmed)) return false;
-  return ALLOWLIST_RE.test(trimmed) || IMPORT_SMOKE_RE.test(trimmed);
+  const argv = parseCommand(cmd);
+  if (!argv) return false;
+  if (!RUNNER_RE.test(argv[0]) && !(SCRIPT_RE.test(argv[0]) && pathSafe(argv[0].slice(2)))) return false;
+  if (/^python3?$/.test(argv[0]) && argv[1] === '-c') return argv.length === 3 && IMPORT_SMOKE_RE.test(argv[2].trim());
+  if (!ALLOWLIST_RE.test(argv.join(' '))) return false;
+  // the runner words themselves (e.g. "python3 -m pytest", "npm run test") are fixed by the allowlist
+  const lead = /^python3?$/.test(argv[0]) && argv[1] === '-m' ? 3 : 1;
+  return argsSafe(argv.slice(lead), argv[0]);
 }
 
 function capBuffer(buf, max) {
@@ -195,16 +292,29 @@ function capBuffer(buf, max) {
   return (b.length > max ? b.slice(0, max) : b).toString('utf8');
 }
 
-// Runs an already-allowlisted command with shell:true, output capped at 64 KB each. Never throws.
+// Runs a command without a shell (argv from parseCommand), output capped at 64 KB each. On
+// Windows the npm/pnpm/yarn/npx shims are .cmd files, which only run through cmd.exe; those get a
+// shell, and only when every word is plain. A missing program reports exit 127, as a shell would.
+// Never throws.
 function runVerify(cmd, cwd, timeoutMs) {
   const start = Date.now();
+  const argv = parseCommand(cmd);
+  if (!argv) return { exit: 126, stdout: '', stderr: 'xend: not a runnable command: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
+  const winShim = process.platform === 'win32' && /^(npm|pnpm|yarn|npx)$/i.test(argv[0]);
+  if (winShim && !argv.every((a) => /^[\w.:/@,+=*-]+$/.test(a))) {
+    return { exit: 126, stdout: '', stderr: 'xend: not a runnable command on Windows: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
+  }
   let res;
   try {
-    res = spawnSync(cmd, { cwd: cwd || process.cwd(), shell: true, timeout: timeoutMs || 120000, maxBuffer: 16 * 1024 * 1024 });
+    const opts = { cwd: cwd || process.cwd(), timeout: timeoutMs || 120000, maxBuffer: 16 * 1024 * 1024 };
+    res = winShim ? spawnSync(argv.join(' '), Object.assign(opts, { shell: true })) : spawnSync(argv[0], argv.slice(1), opts);
   } catch (e) {
     res = { status: 1, stdout: Buffer.from(''), stderr: Buffer.from(String((e && e.message) || e)), error: e };
   }
   const ms = Date.now() - start;
+  if (res.error && res.error.code === 'ENOENT') {
+    return { exit: 127, stdout: '', stderr: argv[0] + ': command not found', ms, timedOut: false };
+  }
   const timedOut = !!(res.error && (res.error.code === 'ETIMEDOUT' || res.signal === 'SIGTERM'));
   let exit = res.status;
   if (exit === null || exit === undefined) exit = timedOut ? 124 : 1;
@@ -435,6 +545,7 @@ module.exports = {
   extractReaderEvidence,
   checkCitations,
   parseWorkerReply,
+  parseCommand,
   commandAllowed,
   runVerify,
   verdictFor,
