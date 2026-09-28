@@ -75,8 +75,9 @@ Claude calls Bash("npm test")
 
 Invariants:
 - The output object keeps the tool's exact shape (Claude Code rejects mismatches and falls back to the original); `persistedOutputPath` and count fields pass through unchanged.
-- Error lines, failure blocks, diffs, stack traces and summary lines are never dropped; diff-shaped and test-run output is never head/tail cut; `Read` results are never altered.
-- A marker line is always present when anything changed; it names a recovery path when at least 2,000 characters were removed (a path invites a re-read, so small removals stay unmarked).
+- Error lines, failure blocks, diffs, stack traces and summary lines are never dropped; diff-shaped and test-run output is never head/tail cut, and whitespace is never changed (a trailing space or a blank line can be what a diff or a failed assertion shows, and `cat` output gets copied into Edit's `old_string`); `Read` results are never altered.
+- Past `shape.maxChars`, generic output and searches (`grep`, `rg`, `git grep`) are reduced in order, stopping as soon as they fit: grep hits with the same text in one file merge onto one line listing every line number (`path:12,40,77:text`, lossless); when that folds away at least 30% of the lines, lines that differ only in numbers or ids keep their first and last occurrence with a count (logs, not source code); then a head and tail cut that keeps the error lines from the middle, up to a quarter of the budget.
+- A marker line is always present when anything changed. It says the result is complete only when nothing but drop-list noise was removed (progress, repeats, passing-test rows, install chatter, JSON whitespace, merged hits); after folding or cutting it says lines were left out and always names the full original. Otherwise it names a recovery path when at least 2,000 characters were removed (a path invites a re-read). A change that does not save at least 200 characters after paying for its own marker is not made.
 - Shaping never calls a model. Transforms are deterministic string operations (masking, not summarizing).
 - Nothing is shaped inside subagents; their evidence must be exact and their context is discarded anyway.
 - The hook exits 0 and prints nothing when it has nothing to change; it never blocks a tool.

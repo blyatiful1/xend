@@ -3,6 +3,52 @@
 Claude Code updates an installed plugin only when this version changes, so every release that
 changes `scripts/`, `hooks/`, `agents/` or `skills/` bumps it.
 
+## 0.4.0 — 2026-09-28
+
+### Cache lifetime
+
+- `/xend:stats --cache-ttl [--days N]` replays your own transcripts (all projects, main
+  conversation, last 30 days by default) at the 5-minute and the 1-hour prompt-cache lifetime and
+  says which would have cost less for the way you work.
+- Measured on the bench with nothing but `CLAUDE_CODE_PROMPT_CACHE_TTL` different (no plugin in
+  either arm, `bench/results/r12-*`): the 5-minute lifetime cost **-25.0%** per short task (95% CI
+  -26.4% to -23.6%, cheaper in 42 of 42 pairs, same pass rate) and -12.2% on the three project
+  tasks (3 of 3 cheaper, all hidden tests passing). This holds only without pauses over five
+  minutes: one long interactive session of this project would have cost 1.4% more.
+- `/xend:doctor` no longer claims the default is the 5-minute cache (on a subscription it is one
+  hour) or recommends the 1-hour cache for everyone; it points to the replay.
+
+### Shaping
+
+- Past the size limit, output is folded before it is cut: grep/rg hits with the same text in one
+  file go on one line listing every line number (lossless), log lines that differ only in numbers
+  keep their first and last occurrence with a count, and a head and tail cut keeps the error
+  lines from the middle. A long `grep` of a log no longer loses the one ERROR line in its middle;
+  on 44 real command outputs, what the model sees fell from -28.3% to -53.4% against raw with no
+  decisive line lost (rtk on the same outputs: -32.7%, 13 lost).
+- The `[xend]` marker calls a result complete only when nothing but known noise was removed; a
+  folded or cut result says it is not the whole output and always names the full original.
+- Whitespace is left alone: trailing spaces and blank lines are content in a diff, a failed
+  assertion, or `cat` output copied into an Edit. Diffs are kept byte for byte apart from colour
+  codes, and a line of dashes (a YAML separator) is no longer taken for a spinner frame.
+- A change that cannot save more than its own marker line is not made (a diff used to grow by
+  its marker).
+- `node --test` output is recognised as a test run: passing tests and their detail blocks drop,
+  failures keep theirs, and its middle is never cut.
+
+### Fixes
+
+- The verifier treats a project script that is missing or committed without its exec bit
+  (`./run_tests.sh`) as a real failure; only a runner missing from the machine is unverifiable.
+- `/xend:stats` finds transcripts under `CLAUDE_CONFIG_DIR` when it is set.
+
+### Bench
+
+- `--arms-file` entries set their `env` on baseline arms too and can pass extra `claude`
+  arguments (`args`); an ambient cache-lifetime setting is removed from every child; each run
+  records which lifetime its cache writes were billed at.
+- `--help` prints usage, and an unknown argument stops the run before any paid job starts.
+
 ## 0.3.0 — 2026-09-28
 
 ### Cheaper per session
