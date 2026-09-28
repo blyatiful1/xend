@@ -281,6 +281,10 @@ function commandAllowed(cmd) {
   if (!RUNNER_RE.test(argv[0]) && !(SCRIPT_RE.test(argv[0]) && pathSafe(argv[0].slice(2)))) return false;
   if (/^python3?$/.test(argv[0]) && argv[1] === '-c') return argv.length === 3 && IMPORT_SMOKE_RE.test(argv[2].trim());
   if (!ALLOWLIST_RE.test(argv.join(' '))) return false;
+  // runners whose default action writes: ruff only checks (`ruff check`, `ruff format --check`),
+  // tsc only type-checks (--noEmit), whatever else the flags say
+  if (argv[0] === 'ruff' && argv.length > 1 && argv[1] !== 'check' && !(argv[1] === 'format' && argv.includes('--check'))) return false;
+  if (argv[0] === 'tsc' && !argv.includes('--noEmit')) return false;
   // the runner words themselves (e.g. "python3 -m pytest", "npm run test") are fixed by the allowlist
   const lead = /^python3?$/.test(argv[0]) && argv[1] === '-m' ? 3 : 1;
   return argsSafe(argv.slice(lead), argv[0]);

@@ -12,7 +12,7 @@ const state = require('./lib/state.js');
 const verify = require('./lib/verify.js');
 
 // below this hook's own 180 s timeout in hooks/hooks.json, so a slow check is reported, not killed
-const VERIFY_TIMEOUT_CAP_MS = 170000;
+const { VERIFY_TIMEOUT_CAP_MS } = config;
 
 function envDisabled(v) {
   return v !== undefined && /^(0|false|off)$/i.test(String(v));

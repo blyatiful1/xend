@@ -45,8 +45,11 @@ function pointerRoots(env) {
   return roots.filter((r, i) => roots.indexOf(r) === i);
 }
 
+// mkdir's mode does not apply to a directory that already exists (one an earlier version made
+// 0755), so the mode is also set explicitly.
 function mkdirPrivate(d) {
   try { fs.mkdirSync(d, { recursive: true, mode: 0o700 }); } catch (_) {}
+  try { fs.chmodSync(d, 0o700); } catch (_) {}
 }
 
 // scratchpadDir: Claude Code's per-session scratch directory from the hook input when present

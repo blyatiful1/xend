@@ -8,7 +8,7 @@ allowed-tools: Bash(node *scripts/xend-cli.js*)
 
 Level requested: `$ARGUMENTS` (empty means show the current level).
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" set "${CLAUDE_SESSION_ID}" terse $ARGUMENTS --data "${CLAUDE_PLUGIN_DATA}" 2>&1 || true`
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" set "${CLAUDE_SESSION_ID}" terse "$ARGUMENTS" --data "${CLAUDE_PLUGIN_DATA}" 2>&1 || true`
 
 If a level was set, apply that output style for the rest of the session, starting with your next reply; if the output only shows the current level, change nothing:
 

@@ -304,6 +304,16 @@ function main() {
       let [sub, ...planArgs] = rest;
       // no subcommand (a skill run with no argument, or only options): status
       if (!sub || sub.startsWith('-')) { if (sub) planArgs.unshift(sub); sub = 'status'; }
+      sub = sub.trim();
+      // /xend:plan may only show the plan or switch the mode; recording a verdict (done) or
+      // rewriting the plan stays with the architect's own commands
+      const fromSkill = planArgs.includes('--from-skill');
+      planArgs = planArgs.filter((a) => a !== '--from-skill');
+      if (fromSkill && !['status', 'next', 'on', 'off'].includes(sub)) {
+        console.log('/xend:plan takes status, next, on or off');
+        process.exitCode = 1;
+        return;
+      }
       planCommand(sub, planArgs, cwd);
       return;
     }

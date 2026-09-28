@@ -69,12 +69,28 @@ test('setup: no arguments is a dry run of balanced that writes nothing', () => {
   assert.equal(fs.existsSync(path.join(sb.dirs.xdg, 'xend', 'config.json')), false);
 });
 
-test('setup: --undo restores the latest backup and keeps the file it replaces', () => {
+test('setup: --undo restores the latest backup, keeps the file it replaces, and a second --undo does not swap back', () => {
   const sb = sandbox();
   fs.writeFileSync(sb.settings, '{ "model": "sonnet" }');
   assert.equal(sb.run(['aggressive']).status, 0);
   const r = sb.run(['--undo']);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(sb.settings, 'utf8')), { model: 'sonnet' });
-  assert.match(r.stdout, /kept at/);
+  assert.match(r.stdout, /kept at .*xend-undo-kept-/);
+  assert.equal(sb.run(['--undo']).status, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(sb.settings, 'utf8')), { model: 'sonnet' }, 'still the original, not the post-setup file');
+});
+
+test('setup: an unparsable settings file stops --compact-instructions too, before anything is written', () => {
+  const sb = sandbox();
+  fs.writeFileSync(sb.settings, '{ "a": 1, }');
+  const r = sb.run(['balanced', '--compact-instructions']);
+  assert.equal(r.status, 1);
+  assert.equal(fs.existsSync(path.join(sb.dirs.claude, 'CLAUDE.md')), false);
+  // and when it does write CLAUDE.md, an existing one is backed up first
+  fs.writeFileSync(sb.settings, '{}');
+  fs.writeFileSync(path.join(sb.dirs.claude, 'CLAUDE.md'), '# mine\n');
+  assert.equal(sb.run(['balanced', '--compact-instructions']).status, 0);
+  assert.ok(fs.readdirSync(sb.dirs.claude).some((f) => f.startsWith('CLAUDE.md.xend-backup-')));
+  assert.match(fs.readFileSync(path.join(sb.dirs.claude, 'CLAUDE.md'), 'utf8'), /^# mine\n[\s\S]*# Compact instructions/);
 });

@@ -13,9 +13,10 @@ const os = require('os');
 const path = require('path');
 const settings = require('./settings.js');
 
-function managedDir(env, platform) {
-  env = env || process.env;
-  if (env.XEND_MANAGED_SETTINGS_DIR) return env.XEND_MANAGED_SETTINGS_DIR; // hermetic tests
+// Where Claude Code reads managed (organisation) settings. Deliberately not overridable from the
+// environment: a repository's .claude/settings.json can set env vars, and must not be able to
+// hide the organisation's deny rules from this check.
+function managedDir(platform) {
   switch (platform || process.platform) {
     case 'darwin': return '/Library/Application Support/ClaudeCode';
     case 'win32': return 'C:\\Program Files\\ClaudeCode';
@@ -36,9 +37,9 @@ function projectRoot(cwd, env) {
 }
 
 // Every settings file that can carry permission rules, most authoritative first.
-function layerFiles(cwd, env) {
+function layerFiles(cwd, env, managed) {
   const files = [];
-  const m = managedDir(env);
+  const m = managed || managedDir();
   files.push({ layer: 'managed', path: path.join(m, 'managed-settings.json') });
   try {
     const dropIn = path.join(m, 'managed-settings.d');
@@ -57,9 +58,9 @@ function layerFiles(cwd, env) {
   return files;
 }
 
-function loadRules(cwd, env) {
+function loadRules(cwd, env, managed) {
   const out = { deny: [], ask: [], allow: [] };
-  for (const f of layerFiles(cwd, env)) {
+  for (const f of layerFiles(cwd, env, managed)) {
     const j = settings.readJsonSafe(f.path);
     const p = j && j.permissions;
     if (!p || typeof p !== 'object') continue;
@@ -102,7 +103,7 @@ function bashRuleMatches(rule, cmd) {
 function check(cmd, opts) {
   opts = opts || {};
   let rules;
-  try { rules = loadRules(opts.cwd, opts.env); } catch (_) { return { ok: false, reason: 'no-rule' }; }
+  try { rules = loadRules(opts.cwd, opts.env, opts.managedDir); } catch (_) { return { ok: false, reason: 'no-rule' }; }
   for (const key of ['deny', 'ask']) {
     const hit = rules[key].find((r) => bashRuleMatches(r.rule, cmd));
     if (hit) return { ok: false, reason: key, rule: hit.rule, path: hit.path };

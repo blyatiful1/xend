@@ -79,3 +79,13 @@ test('state directories and saved files are private to the user', { skip: proces
   state.writeJson(path.join(dir, 'x.json'), { a: 1 });
   assert.equal(fs.statSync(path.join(dir, 'x.json')).mode & 0o777, 0o600);
 });
+
+test('/xend:plan (--from-skill) only shows the plan or switches the mode', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-sd-cwd-'));
+  const env = baseEnv({ XEND_STATE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-sd-state-')) });
+  const r = spawnSync(process.execPath, [CLI, 'plan', 'done T1 PASS', '--from-skill', '--session', 'sid-p'], { encoding: 'utf8', env, cwd });
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /takes status, next, on or off/);
+  const status = spawnSync(process.execPath, [CLI, 'plan', '', '--from-skill', '--session', 'sid-p'], { encoding: 'utf8', env, cwd });
+  assert.match(status.stdout, /no plan set for this session/, 'an empty argument means status');
+});

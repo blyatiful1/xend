@@ -21,6 +21,8 @@ function main() {
   // alone is also set on the main thread of a `claude --agent` session, which is shaped as usual.
   if (input.agent_id || /\/subagents\//.test(input.transcript_path || '')) return;
   const dir = state.sessionDir(input.session_id, process.env, input.scratchpad_dir);
+  // pre-read.js already cut this read: its note is owed whatever the shaping settings say now
+  if (tool === 'Read') limitedReadContext(input, resp, dir, input.tool_use_id || '');
   const cfg = state.readJson(path.join(dir, 'config.json'), null) || config.resolve({ cwd: input.cwd });
   const overrides = state.sessionOverrides(dir);
   if (overrides.shape === false || !cfg.shape || !cfg.shape.enabled) return;
@@ -30,7 +32,7 @@ function main() {
 
   let result = null;
   if (tool === 'Bash') result = handleBash(input, resp, sc, dir, id);
-  else if (tool === 'Read') { limitedReadContext(input, resp, dir, id); result = handleRead(input, resp, sc, dir, id); }
+  else if (tool === 'Read') result = handleRead(input, resp, sc, dir, id);
   else if (tool === 'Grep') result = handleGrep(input, resp, sc, dir, id);
   else if (tool === 'Glob') result = handleGlob(input, resp, sc, dir, id);
   else if (tool.startsWith('mcp__') && sc.mcp) result = handleMcp(input, resp, sc, dir, id);

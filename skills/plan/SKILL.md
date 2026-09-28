@@ -10,7 +10,7 @@ Architect mode is off unless enabled with `/xend:plan on`, `XEND_ARCHITECT=1` or
 
 Requested: `$ARGUMENTS` (empty means `status`; one of `status`, `next`, `off`, `on`).
 
-!`node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" plan $ARGUMENTS --session "${CLAUDE_SESSION_ID}" --data "${CLAUDE_PLUGIN_DATA}" 2>&1 || true`
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/xend-cli.js" plan "$ARGUMENTS" --from-skill --session "${CLAUDE_SESSION_ID}" --data "${CLAUDE_PLUGIN_DATA}" 2>&1 || true`
 
 Show the output above verbatim, then continue.
 

@@ -39,8 +39,8 @@ function main() {
   if (input.agent_id || /\/subagents\//.test(input.transcript_path || '')) return;
   const dir = state.sessionDir(input.session_id, process.env, input.scratchpad_dir);
   const cfg = state.readJson(path.join(dir, 'config.json'), null) || require('./lib/config.js').resolve({ cwd: input.cwd });
-  const min = cfg.shape && cfg.shape.readLimitMinLines;
-  if (!min) return;
+  const min = cfg.shape && cfg.shape.enabled !== false && cfg.shape.readLimitMinLines;
+  if (!min || state.sessionOverrides(dir).shape === false) return;
   if (!insideProject(ti.file_path, process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd())) return;
   let st;
   try { st = fs.statSync(ti.file_path); } catch (_) { return; }

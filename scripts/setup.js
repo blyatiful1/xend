@@ -71,6 +71,8 @@ function appendCompactInstructions(dry) {
   console.log((dry ? '[dry-run] ' : '') + 'append "# Compact instructions" section to ' + file);
   if (dry) return;
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  const b = backup(file);
+  if (b) console.log('backup: ' + b);
   fs.writeFileSync(file, cur + (cur.endsWith('\n') || !cur ? '' : '\n') + COMPACT_INSTRUCTIONS);
 }
 
@@ -88,9 +90,11 @@ function readSettings(f) {
   } catch (e) { return { error: e.message }; }
 }
 
-function backup(file) {
+// kind 'backup' copies are what --undo restores; 'undo-kept' (the file an --undo replaced) is kept
+// under another name, so a second --undo still reaches the original and never swaps back and forth.
+function backup(file, kind) {
   if (!fs.existsSync(file)) return null;
-  const b = file + '.xend-backup-' + new Date().toISOString().replace(/[:.]/g, '-');
+  const b = file + '.xend-' + (kind || 'backup') + '-' + new Date().toISOString().replace(/[:.]/g, '-');
   fs.copyFileSync(file, b);
   return b;
 }
@@ -165,19 +169,19 @@ function main() {
     if (!backups.length) { console.log('no xend backup found next to ' + file); return; }
     const latest = path.join(dir, backups[backups.length - 1]);
     if (dry) { console.log('[dry-run] would restore ' + file + ' from ' + latest); return; }
-    const kept = backup(file);
+    const kept = backup(file, 'undo-kept');
     fs.copyFileSync(latest, file);
     console.log('restored ' + file + ' from ' + latest + (kept ? ' (the replaced file is kept at ' + kept + ')' : ''));
     return;
   }
-  if (compactInstructions) appendCompactInstructions(dry);
   if (!profileName) {
+    if (compactInstructions) appendCompactInstructions(dry);
     if (!compactInstructions && !installPonytail) { console.log('usage: setup.js <lite|balanced|aggressive> [--scope user|project|project-shared] [--dry-run] [--with-recommended] [--compact-instructions] [--install-ponytail] [--undo]'); process.exitCode = 1; }
     if (installPonytail) ponytailStep('balanced', cwd, true, dry);
     return;
   }
 
-  // Read both files before writing either, so an unreadable one stops the run with nothing changed.
+  // Read both files before writing anything, so an unreadable one stops the run with nothing changed.
   const cfgFile = config.userConfigPath();
   const userRead = readSettings(cfgFile);
   const settingsRead = readSettings(file);
@@ -188,6 +192,7 @@ function main() {
       return;
     }
   }
+  if (compactInstructions) appendCompactInstructions(dry);
 
   // 1) record the profile for xend itself
   const userCfg = userRead.value || {};

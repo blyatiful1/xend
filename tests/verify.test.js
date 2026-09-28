@@ -270,7 +270,7 @@ test('commandAllowed: accepts allowlisted test/lint commands', () => {
     './scripts/run-test.sh',
     'ruff',
     'eslint',
-    'tsc',
+    'tsc --noEmit',
     'mypy',
   ]) {
     assert.equal(verify.commandAllowed(cmd), true, cmd);
@@ -334,6 +334,7 @@ test('commandAllowed: accepts the flags real test and lint runs use', () => {
     'go test -run TestX -count=1 ./...',
     'cargo test --workspace -- --nocapture',
     'ruff check src tests',
+    'ruff format --check .',
     'tsc --noEmit -p tsconfig.json',
   ]) {
     assert.equal(verify.commandAllowed(cmd), true, cmd);
@@ -358,6 +359,9 @@ test('commandAllowed: rejects newlines, expansions and flags that write, delete 
     'npm test --script-shell=/bin/evil',
     'node --test --require /tmp/x.js',
     'eslint --fix src',
+    'ruff format .',
+    'tsc',
+    'tsc -p tsconfig.json',
     'make test SHELL=/bin/evil',
     'pytest-evil -q',
     './../outside-test.sh',
@@ -680,11 +684,10 @@ test('recordLaunch: caps the registry at the 200 most recent entries', () => {
 // end-to-end: node scripts/subagent-stop.js (and scripts/agent-launch.js)
 // ============================================================================
 
-// No user or managed settings from the machine running the tests: permission rules come only
-// from what each test writes.
+// No user settings from the machine running the tests: permission rules come only from what
+// each test writes (managed settings cannot be redirected, by design; CI machines have none).
 const HERMETIC_ENV = {
   CLAUDE_CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-verify-home-')),
-  XEND_MANAGED_SETTINGS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-verify-managed-')),
 };
 
 function runHook(scriptPath, input, env) {

@@ -17,6 +17,7 @@ const path = require('path');
 const verify = require('./verify.js');
 const state = require('./state.js');
 const permissions = require('./permissions.js');
+const { AUTOTEST_TIMEOUT_CAP_MS } = require('./config.js');
 
 // --tb=no -rfE: one 'FAILED test - message' line per failure, the most compact form that still names
 // what broke; the model runs pytest itself when it needs a traceback.
@@ -133,7 +134,7 @@ function run(opts) {
     if (typeof opts.onBlocked === 'function') opts.onBlocked(cmd, perm);
     return null;
   }
-  const r = verify.runVerify(cmd, root, Math.min(ac.timeoutMs || 20000, 25000));
+  const r = verify.runVerify(cmd, root, Math.min(ac.timeoutMs || 20000, AUTOTEST_TIMEOUT_CAP_MS));
   const combined = (r.stdout || '') + (r.stderr ? '\n' + r.stderr : '');
   const secs = (r.ms / 1000).toFixed(1) + 's';
   if (r.timedOut || r.ms > (ac.maxMs != null ? ac.maxMs : 8000)) {

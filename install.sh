@@ -67,7 +67,7 @@ fi
 say ""
 say "Done. Start a new Claude Code session, then:"
 say "  /xend:doctor                 audit this environment for token waste"
-say "  /xend:setup $PROFILE --dry-run            preview the recommended native settings"
+say "  /xend:setup $PROFILE --dry-run --with-recommended   preview the recommended native settings"
 say "  /xend:setup $PROFILE --with-recommended   apply them (backup + diff; /xend:setup --undo restores)"
 say "  Auto-test after edits runs once your test command is allowed (approve it once with \"don't ask again\")"
 say "  /xend:stats                  see what a session spent and what shaping saved"

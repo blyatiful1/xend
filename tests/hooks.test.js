@@ -23,7 +23,6 @@ function hook(script, input, env) {
     XEND_STATE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-hk-state-')),
     XDG_CONFIG_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-hk-xdg-')),
     CLAUDE_CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-hk-home-')),
-    XEND_MANAGED_SETTINGS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'xend-hk-managed-')),
   }, env);
   delete childEnv.NODE_TEST_CONTEXT;
   delete childEnv.CLAUDE_PROJECT_DIR;
@@ -79,4 +78,18 @@ test('pre-read + post-tool-use: parallel limited reads each keep their own note'
       tool_response: { type: 'text', file: { filePath: path.join(d, f), content: 'x', numLines: 250, startLine: 1, totalLines: 900 } } }, env);
     assert.match(out.hookSpecificOutput.additionalContext, new RegExp(f.replace('.', '\\.') + ' has 900 lines'), id);
   }
+});
+
+test('post-tool-use: a limited read gets its note even when shaping is off for the session', () => {
+  const big = Array.from({ length: 900 }, (_, i) => 'x' + i + ' ' + 'y'.repeat(30)).join('\n') + '\n';
+  const d = tmp({ 'a.txt': big });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-hk-state-'));
+  hook('pre-read.js', { hook_event_name: 'PreToolUse', session_id: 's5', cwd: d, tool_name: 'Read', tool_use_id: 'r1', tool_input: { file_path: path.join(d, 'a.txt') } }, { XEND_PROFILE: 'aggressive', XEND_STATE_DIR: stateDir });
+  const out = hook('post-tool-use.js', { hook_event_name: 'PostToolUse', session_id: 's5', cwd: d, tool_name: 'Read', tool_use_id: 'r1',
+    tool_input: { file_path: path.join(d, 'a.txt'), limit: 250 },
+    tool_response: { type: 'text', file: { filePath: path.join(d, 'a.txt'), content: 'x', numLines: 250, startLine: 1, totalLines: 900 } } },
+    { XEND_PROFILE: 'aggressive', XEND_STATE_DIR: stateDir, XEND_SHAPE: '0' });
+  assert.match(out.hookSpecificOutput.additionalContext, /a\.txt has 900 lines/);
+  // and with shaping off from the start, pre-read does not limit at all
+  assert.equal(hook('pre-read.js', { hook_event_name: 'PreToolUse', session_id: 's6', cwd: d, tool_name: 'Read', tool_use_id: 'r2', tool_input: { file_path: path.join(d, 'a.txt') } }, { XEND_PROFILE: 'aggressive', XEND_SHAPE: '0' }), null);
 });

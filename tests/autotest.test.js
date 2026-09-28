@@ -10,10 +10,9 @@ const autotest = require('../scripts/lib/autotest.js');
 // The CI unit-test job has Node but not pytest; the pytest-backed cases run wherever it exists.
 const NO_PYTEST = spawnSync('python3', ['-c', 'import pytest'], { stdio: 'ignore' }).status !== 0 && 'pytest not installed';
 
-// No user or managed settings from the machine running the tests: permission rules come only
-// from what each test writes into its project.
+// No user settings from the machine running the tests: permission rules come only from what each
+// test writes into its project (managed settings cannot be redirected, by design).
 process.env.CLAUDE_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-home-'));
-process.env.XEND_MANAGED_SETTINGS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-managed-'));
 delete process.env.CLAUDE_PROJECT_DIR;
 
 // node --test marks its children with NODE_TEST_CONTEXT; a nested `node --test` started by the
@@ -191,4 +190,17 @@ test('run: a missing runner (exit 127) switches auto-test off for the session', 
   finally { process.env.PATH = savedPath; }
   assert.strictEqual(r, null);
   assert.strictEqual(JSON.parse(fs.readFileSync(path.join(stateDir, 'autotest.json'), 'utf8')).reason, 'no-runner');
+});
+
+test('permissions: managed deny rules win over everything, and the managed dir is not taken from the environment', () => {
+  const permissions = require('../scripts/lib/permissions.js');
+  const managed = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-managed-'));
+  fs.writeFileSync(path.join(managed, 'managed-settings.json'), JSON.stringify({ permissions: { deny: ['Bash(npm test:*)'] } }));
+  const d = tmp({ '.claude/settings.json': JSON.stringify({ permissions: { allow: ['Bash(npm test:*)'] } }) });
+  const r = permissions.check('npm test --silent', { cwd: d, managedDir: managed, trusted: true, permissionMode: 'bypassPermissions' });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'deny');
+  process.env.XEND_MANAGED_SETTINGS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-empty-'));
+  try { assert.notStrictEqual(permissions.managedDir(), process.env.XEND_MANAGED_SETTINGS_DIR); }
+  finally { delete process.env.XEND_MANAGED_SETTINGS_DIR; }
 });
