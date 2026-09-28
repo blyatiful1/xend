@@ -31,7 +31,7 @@ function encodeProjectDir(cwd) {
 
 function projectsRoot(env) {
   env = env || process.env;
-  return path.join(os.homedir(), '.claude', 'projects');
+  return path.join(env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects');
 }
 
 function projectDirFor(cwd, env) {

@@ -3,6 +3,7 @@
 // xend stats — token/cost/shaping report for one Claude Code session transcript.
 //
 //   node scripts/stats.js [--session <path-or-id>] [--cwd <dir>] [--json] [--last N]
+//   node scripts/stats.js --cache-ttl [--days 30] [--json]   which prompt-cache lifetime is cheaper
 
 const fs = require('fs');
 const os = require('os');
@@ -10,6 +11,7 @@ const path = require('path');
 const readline = require('readline');
 
 const transcript = require('./lib/transcript');
+const cachettl = require('./lib/cachettl.js');
 const state = require('./lib/state.js');
 
 // --- CLI args ----------------------------------------------------------------
@@ -23,6 +25,8 @@ function parseArgs(argv) {
     else if (a === '--json') args.json = true;
     else if (a === '--last') args.last = Number(argv[++i]);
     else if (a === '--data') args.data = argv[++i];
+    else if (a === '--cache-ttl') args.cacheTtl = true;
+    else if (a === '--days') args.days = Number(argv[++i]);
     else if (a.startsWith('--session=')) args.session = a.slice('--session='.length);
     else if (a.startsWith('--cwd=')) args.cwd = a.slice('--cwd='.length);
     else if (a.startsWith('--last=')) args.last = Number(a.slice('--last='.length));
@@ -419,10 +423,44 @@ function truncateLabel(s, n) {
 
 // --- main ------------------------------------------------------------------
 
+// Every top-level session transcript (all projects: the cached system prompt and tools are shared
+// across them) modified in the last `days` days.
+function recentSessionTranscripts(days, env) {
+  const root = transcript.projectsRoot(env);
+  const since = Date.now() - days * 86400000;
+  const out = [];
+  let projects = [];
+  try { projects = fs.readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()); } catch (_) { return out; }
+  for (const p of projects) {
+    let files = [];
+    try { files = fs.readdirSync(path.join(root, p.name)).filter((f) => f.endsWith('.jsonl')); } catch (_) { continue; }
+    for (const f of files) {
+      const full = path.join(root, p.name, f);
+      try { if (fs.statSync(full).mtimeMs >= since) out.push(full); } catch (_) { /* gone */ }
+    }
+  }
+  return out;
+}
+
+async function cacheTtlReport(args) {
+  const days = Number.isFinite(args.days) && args.days > 0 ? args.days : 30;
+  const calls = [];
+  for (const file of recentSessionTranscripts(days, process.env)) {
+    const lines = [];
+    const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
+    for await (const line of rl) if (line.includes('"assistant"') && line.includes('"usage"')) lines.push(line);
+    calls.push(...cachettl.callsFromLines(lines, file));
+  }
+  const r = cachettl.replay(calls);
+  if (args.json) console.log(JSON.stringify(Object.assign({ days }, r), null, 2));
+  else console.log(cachettl.formatReport(r, { days }));
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   // skills pass the substituted ${CLAUDE_PLUGIN_DATA}; the Bash tool that runs them lacks it
   if (args.data && !args.data.includes('${') && path.isAbsolute(args.data)) process.env.CLAUDE_PLUGIN_DATA = args.data;
+  if (args.cacheTtl) return cacheTtlReport(args);
   const cwd = args.cwd ? path.resolve(args.cwd) : process.cwd();
   const resolved = transcript.resolveTranscriptPath({ session: args.session, cwd, env: process.env });
 

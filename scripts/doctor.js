@@ -272,15 +272,15 @@ function checkSettings(cwd) {
     );
   }
 
-  if (merged.promptCacheTtl === undefined) {
+  if (merged.promptCacheTtl === undefined && !(merged.env && merged.env.CLAUDE_CODE_PROMPT_CACHE_TTL)) {
     findings.push(
       finding(
         'small',
         'settings',
-        'promptCacheTtl is unset',
-        'no explicit promptCacheTtl (defaults to the 5-minute cache)',
-        'Interactive sessions with gaps over 5 minutes (review pauses, waiting on CI, context switches) fall out of the 5-minute cache and pay a full cache-write again on the next turn.',
-        'Set `promptCacheTtl: "1h"` for interactive sessions with pauses > 5 min. Trade-off: a 1h cache write costs 2x the input price vs 1.25x for 5m, so it only pays off if the cache would otherwise have expired before reuse.',
+        'promptCacheTtl is unset (automatic lifetime)',
+        'no explicit promptCacheTtl: 1 hour on a Claude subscription, 5 minutes on an API key, Bedrock or Vertex',
+        'A 1-hour cache write costs 2x the input price, a 5-minute one 1.25x; a read costs 0.1x either way. Work without pauses over 5 minutes pays less at 5 minutes (xend bench r12: -25% on 42 paired short tasks, same pass rate); a pause of 5-60 minutes makes the 5-minute cache write the whole context again.',
+        'Run `/xend:stats --cache-ttl` to replay your own sessions at both lifetimes, then set `promptCacheTtl` (or `CLAUDE_CODE_PROMPT_CACHE_TTL` for `claude -p` and CI runs) to the cheaper one.',
         {}
       )
     );

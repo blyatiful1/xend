@@ -1,7 +1,7 @@
 ---
 name: stats
 description: Token, cost, cache and tool-result statistics for a session, plus xend shaping diagnostics.
-argument-hint: "[--session <id-or-path>] [--json]"
+argument-hint: "[--session <id-or-path>] [--json] | --cache-ttl [--days N]"
 disable-model-invocation: true
 allowed-tools: Bash(node *scripts/stats.js*)
 ---
