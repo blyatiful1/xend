@@ -89,3 +89,18 @@ test('run: a failing suite reports exit and the failure, without the do-not-re-r
   assert.ok(/exit [1-9]/.test(r), r);
   assert.ok(!r.includes('do not re-run'));
 });
+
+test('run: a suite that cannot be collected yet (missing module) produces no note', () => {
+  const d = tmp({ 'a.py': 'x = 1\n', 'test_a.py': 'import not_written_yet\ndef test_a():\n    pass\n' });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
+  assert.strictEqual(run({ root: d, file: path.join(d, 'a.py'), cfg: {}, dir: stateDir, toolUseId: 't1' }), null);
+});
+
+test('run: a pytest failure is reported as compact FAILED lines plus the summary', () => {
+  const d = tmp({ 'a.py': 'x = 1\n', 'test_a.py': 'def test_a():\n    assert 1 == 2, "values differ"\ndef test_b():\n    pass\n' });
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-at-state-'));
+  const r = run({ root: d, file: path.join(d, 'a.py'), cfg: {}, dir: stateDir, toolUseId: 't1' });
+  assert.ok(r.includes('FAILED test_a.py::test_a - AssertionError: values differ'), r);
+  assert.ok(r.includes('1 failed, 1 passed'), r);
+  assert.ok(!r.includes('short test summary info'), r);
+});

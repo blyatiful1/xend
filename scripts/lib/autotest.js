@@ -13,7 +13,9 @@ const path = require('path');
 const verify = require('./verify.js');
 const state = require('./state.js');
 
-const PY_CMD = 'python3 -m pytest -q --tb=line -p no:cacheprovider';
+// --tb=no -rfE: one 'FAILED test - message' line per failure, the most compact form that still names
+// what broke; the model runs pytest itself when it needs a traceback.
+const PY_CMD = 'python3 -m pytest -q --tb=no -rfE -p no:cacheprovider';
 const SKIP_EXT = /\.(md|mdx|txt|rst|adoc|lock|log|csv|svg|png|jpe?g|gif|ico|pdf)$/i;
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build', '.tox', '.mypy_cache', 'target']);
 
@@ -85,6 +87,7 @@ function condense(text, maxChars) {
     if (/^(ok|✔)\s/.test(t)) return false;                                   // passing rows
     if (/^at .*\bnode:(internal|diagnostics_channel)/.test(t) || /^at node:internal/.test(t)) return false; // runtime frames
     if (/^ℹ (suites|cancelled|skipped|todo|duration_ms) /.test(t)) return false; // node --test zero rows
+    if (/^=+ (short test summary info|FAILURES|ERRORS) =+$/.test(t)) return false; // pytest section rules
     return true;
   });
   let out = keep.join('\n');
@@ -123,6 +126,10 @@ function run(opts) {
     state.writeJson(flagFile, Object.assign(st, { disabled: true, reason: 'no-runner' }));
     return null;
   }
+  // Nothing ran: the suite could not be collected (a module the tests import does not exist yet,
+  // typical while a feature is being built file by file) or collected no tests. That says nothing
+  // about this edit, and a failure note here only distracts; the model runs the tests itself later.
+  if (r.exit === 5 || /error(s)? during collection/.test(combined) || (r.exit !== 0 && /\bno tests ran\b/.test(combined))) return null;
   const sig = state.hash(signature(combined) + '|' + r.exit);
   const prev = st.last;
   st.last = sig; st.runs = (st.runs || 0) + 1;
