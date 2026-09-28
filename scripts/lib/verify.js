@@ -271,6 +271,8 @@ function segmentRe(seg) {
   return new RegExp('^' + re + '$');
 }
 
+const MAX_GLOB_WORDS = 5000;
+
 // Pathname expansion as bash does it by default: the sorted matching paths under cwd, or the word
 // itself when nothing matches. Names starting with "." match only a pattern that does too.
 function expandGlob(word, cwd) {
@@ -369,12 +371,21 @@ function runVerify(cmd, cwd, timeoutMs) {
   const start = Date.now();
   const parsed = parseCommand(cmd);
   if (!parsed) return { exit: 126, notRunnable: true, stdout: '', stderr: 'xend: not a runnable command: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
+  // Expanded names are file paths, never options: a file called "--basetemp=x" becomes
+  // "./--basetemp=x", so a glob cannot smuggle in a flag the allowlist refused. At most
+  // MAX_GLOB_WORDS words in all.
   const argv = [];
-  parsed.forEach((a, i) => {
+  for (let i = 0; i < parsed.length; i++) {
+    const a = parsed[i];
     let words = [a];
-    if (parsed.globs[i] && pathSafe(a)) { try { words = expandGlob(a, cwd || process.cwd()); } catch (_) { words = [a]; } }
-    argv.push(...words);
-  });
+    if (parsed.globs[i] && pathSafe(a)) {
+      try { words = expandGlob(a, cwd || process.cwd()).map((w) => (w !== a && w.startsWith('-') ? './' + w : w)); } catch (_) { words = [a]; }
+    }
+    for (const w of words) argv.push(w);
+    if (argv.length > MAX_GLOB_WORDS) {
+      return { exit: 126, notRunnable: true, stdout: '', stderr: 'xend: glob expands to more than ' + MAX_GLOB_WORDS + ' words: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
+    }
+  }
   const winShim = process.platform === 'win32' && /^(npm|pnpm|yarn|npx|tsc|eslint)$/i.test(argv[0]);
   if (winShim && !argv.every((a) => /^[\w.:/@,+=*-]+$/.test(a))) {
     return { exit: 126, notRunnable: true, stdout: '', stderr: 'xend: not a runnable command on Windows: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };

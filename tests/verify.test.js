@@ -420,6 +420,12 @@ test('runVerify: expands globs as bash does (matches sorted, no match left liter
   for (const f of ['tests/test_b.py', 'tests/test_a.py', 'tests/.test_hidden.py', 'tests/other.py']) writeFileDeep(path.join(d, f), '');
   const r = verify.runVerify("node -e 'console.log(process.argv.slice(1).join())' tests/test_*.py tests/none_*.py 'tests/q*.py'", d, 5000);
   assert.equal(r.stdout.trim(), 'tests/test_a.py,tests/test_b.py,tests/none_*.py,tests/q*.py');
+  // a file named like a flag comes through as a path, never as an option
+  writeFileDeep(path.join(d, 'x', '--basetemp=evil'), '');
+  const f = verify.runVerify("node -e 'console.log(process.argv.slice(1).join())' x/*", d, 5000);
+  assert.equal(f.stdout.trim(), 'x/--basetemp=evil');
+  const top = verify.runVerify("node -e 'console.log(process.argv.slice(1).join())' --*", path.join(d, 'x'), 5000);
+  assert.equal(top.stdout.trim(), './--basetemp=evil');
 });
 
 test('runVerify: notRunnable only when xend could not start the command, not when it ran and exited 127; a bad glob never throws', () => {
