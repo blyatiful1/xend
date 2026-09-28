@@ -435,10 +435,26 @@ test('runVerify: notRunnable only when xend could not start the command, not whe
   assert.equal(ran.exit, 127);
   assert.equal(ran.notRunnable, undefined);
   assert.doesNotThrow(() => verify.runVerify("node -e '1' []] [a", d, 5000));
-  // a runner that exists but cannot be executed is "could not start", not a failed check
-  fs.writeFileSync(path.join(d, 'notexec'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
-  const nx = verify.runVerify('./notexec', d, 5000);
-  if (process.platform !== 'win32') { assert.equal(nx.notRunnable, true); assert.match(nx.stderr, /cannot execute/); }
+  if (process.platform !== 'win32') {
+    // a runner on PATH that cannot be executed is "could not start", not a failed check
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-rv-bin-'));
+    fs.writeFileSync(path.join(bin, 'xend-fake-runner'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+    const savedPath = process.env.PATH;
+    process.env.PATH = bin + path.delimiter + savedPath;
+    try {
+      const nx = verify.runVerify('xend-fake-runner', d, 5000);
+      assert.equal(nx.notRunnable, true);
+      assert.match(nx.stderr, /cannot execute/);
+    } finally { process.env.PATH = savedPath; }
+    // the project's own script committed without its exec bit, or missing, is a real failure
+    fs.writeFileSync(path.join(d, 'run_test.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+    const own = verify.runVerify('./run_test.sh', d, 5000);
+    assert.equal(own.exit, 126);
+    assert.equal(own.notRunnable, undefined);
+    const gone = verify.runVerify('./missing_test.sh', d, 5000);
+    assert.equal(gone.exit, 127);
+    assert.equal(gone.notRunnable, undefined);
+  }
   // "[!]" is not a bracket expression in bash: it stays literal text
   fs.writeFileSync(path.join(d, 'a'), '');
   const lit = verify.runVerify("node -e 'console.log(process.argv[1])' [!]", d, 5000);

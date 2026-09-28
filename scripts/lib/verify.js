@@ -365,7 +365,8 @@ function capBuffer(buf, max) {
 
 // Runs a command without a shell (argv from parseCommand, globs expanded as bash would), output
 // capped at 64 KB each. notRunnable is set only when xend itself could not start the command
-// (refused, a missing program): a command that ran and exited 126 or 127 is an ordinary failure. On Windows, npm, pnpm, yarn and the tools npm installs (tsc, eslint) are
+// (refused, or a runner missing from the machine): a command that ran and exited 126 or 127, or a
+// project script that is missing or not executable, is an ordinary failure. On Windows, npm, pnpm, yarn and the tools npm installs (tsc, eslint) are
 // .cmd shims, which only run through cmd.exe; those get a shell, and only when every word is
 // plain. A missing program reports exit 127, as a shell would. Never throws.
 function runVerify(cmd, cwd, timeoutMs) {
@@ -399,10 +400,16 @@ function runVerify(cmd, cwd, timeoutMs) {
     res = { status: 1, stdout: Buffer.from(''), stderr: Buffer.from(String((e && e.message) || e)), error: e };
   }
   const ms = Date.now() - start;
-  // the program could not be started at all: missing, not executable, busy, or not a valid binary
+  // The program could not be started at all: missing, not executable, busy, or not a valid binary.
+  // A bare runner (pytest, npm) is the machine's toolchain, so the check is unverifiable here. A
+  // path (./run_tests.sh) is the project's own file, and a missing one or one committed without
+  // its exec bit is a real defect: an ordinary failure with the exit code a shell would give.
   if (res.error && ['ENOENT', 'EACCES', 'ETXTBSY', 'ENOEXEC'].includes(res.error.code)) {
-    const why = res.error.code === 'ENOENT' ? 'command not found' : 'cannot execute (' + res.error.code + ')';
-    return { exit: res.error.code === 'ENOENT' ? 127 : 126, notRunnable: true, stdout: '', stderr: argv[0] + ': ' + why, ms, timedOut: false };
+    const why = res.error.code === 'ENOENT' ? (argv[0].includes('/') ? 'No such file or directory' : 'command not found') : 'cannot execute (' + res.error.code + ')';
+    const exit = res.error.code === 'ENOENT' ? 127 : 126;
+    const r = { exit, stdout: '', stderr: argv[0] + ': ' + why, ms, timedOut: false };
+    if (!/[\\/]/.test(argv[0])) r.notRunnable = true;
+    return r;
   }
   const timedOut = !!(res.error && (res.error.code === 'ETIMEDOUT' || res.signal === 'SIGTERM'));
   let exit = res.status;
