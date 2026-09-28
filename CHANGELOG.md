@@ -25,12 +25,19 @@ changes `scripts/`, `hooks/`, `agents/` or `skills/` bumps it.
   run it without asking: an allow rule matches it, the session is in `bypassPermissions` mode, or
   the user opted in (`"trustTestCommands": true` in `~/.config/xend/config.json`, or
   `XEND_TRUST_TESTS=1`). A deny or ask rule always wins. Otherwise the user gets one line per
-  session naming the allow rule to add; the model gets nothing. Managed settings,
-  `CLAUDE_CONFIG_DIR` and the project root (`CLAUDE_PROJECT_DIR`) are now read for these rules.
-- Commands run without a shell, and must pass an allowlist of runners and flags with project-
-  relative paths: a verify line like `pytest --basetemp=$HOME` or `npm test\ntouch x` is refused.
-- A repository's `.xend.json` can no longer turn the auto-test on, choose its command, trust it,
-  or stretch its timeouts. Timeouts are capped below the hook timeouts.
+  session naming the allow rule to add (the exact command, or the runner's own words such as
+  `Bash(npm test:*)`; never a bare interpreter); the model gets nothing. Allow rules count only
+  from managed settings, the user's settings and the project root (a nested repository's
+  `.claude/` can add deny rules only), match literally as Claude Code does, and respect
+  `allowManagedPermissionRulesOnly`. Trust and the auto-test settings are resolved when the hook
+  runs, never from the model-writable session cache.
+- Commands run without a shell (globs expanded as bash would), and must pass an allowlist of
+  runners and flags with project-relative paths: a verify line like `pytest --basetemp=$HOME` or
+  `npm test\ntouch x` is refused, `ruff` may only check and `tsc` needs `--noEmit`. A command that
+  cannot run on the machine (exit 126 or 127) is recorded as unverifiable, not as a failure.
+- A repository's `.xend.json` can no longer turn the auto-test on (by any value, or by choosing
+  a profile), choose its command, trust it, or stretch its timeouts. Timeouts are capped below the
+  hook timeouts.
 - SubagentStop returns at once for subagents that are not xend's and do not belong to the
   session's plan (it used to wait about 0.6 s for each) and never promotes an unrelated
   subagent's `Task:` line.
@@ -49,7 +56,9 @@ changes `scripts/`, `hooks/`, `agents/` or `skills/` bumps it.
   they show the current value (setup: a dry run of `balanced`).
 - Settings made from skills (`/xend:terse`, `/xend:ponytail`, `/xend:plan on|off`,
   `/xend:checkpoint` notes) reach the hooks in a plugin install: the CLI now finds the state
-  directory the hooks use. `/xend:plan on` actually turns architect mode on.
+  directory the hooks use, and so do the architect's own `plan set` / `plan next` commands.
+  `/xend:plan on` actually turns architect mode on; `/xend:plan` accepts only status, next, on and
+  off.
 - `/xend:setup` stops without writing when a settings file does not parse, instead of replacing
   it; it backs up every file it changes, accepts a UTF-8 byte-order mark, and `--undo` keeps the
   file it replaces.

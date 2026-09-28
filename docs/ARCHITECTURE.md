@@ -145,9 +145,13 @@ mechanically. `scripts/record-edit.js` (PostToolUse on `Edit|MultiEdit`, main se
 2. asks `scripts/lib/permissions.js` whether Claude Code would run it without a prompt, since a
    test command runs the repository's own code and a hook cannot ask: an allow rule matches it,
    the hook input's `permission_mode` is `bypassPermissions`, or the user opted in at user level
-   (`trustTestCommands`, `XEND_TRUST_TESTS=1`). A deny or ask rule in any layer (managed
-   `managed-settings.json` and `managed-settings.d/`, user under `CLAUDE_CONFIG_DIR`, project and
-   local under `CLAUDE_PROJECT_DIR`) always wins. When the answer is no, the model gets nothing and
+   (`trustTestCommands`, `XEND_TRUST_TESTS=1`, resolved when the hook runs, never read from the
+   session's cached config). A deny or ask rule in any layer (managed `managed-settings.json` and
+   `managed-settings.d/`, user under `CLAUDE_CONFIG_DIR` and `~/.claude`, project and local under
+   `CLAUDE_PROJECT_DIR`, the git root and the current directory) always wins. Allow rules count
+   only where Claude Code reads them (managed, user, project root; only managed ones under
+   `allowManagedPermissionRulesOnly`) and match literally; aliases such as `python -m pytest` for
+   `pytest` only widen deny and ask rules. When the answer is no, the model gets nothing and
    the user one `systemMessage` per session naming the allow rule to add (the model never sees
    it: verified against Claude Code 2.1.283 through a local stand-in for the API);
 3. runs it without a shell (argv from `verify.parseCommand`), with a hard timeout (20 s, capped

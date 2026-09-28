@@ -89,3 +89,25 @@ test('/xend:plan (--from-skill) only shows the plan or switches the mode', () =>
   const status = spawnSync(process.execPath, [CLI, 'plan', '', '--from-skill', '--session', 'sid-p'], { encoding: 'utf8', env, cwd });
   assert.match(status.stdout, /no plan set for this session/, 'an empty argument means status');
 });
+
+test('the architect\'s own plan commands (no --session, no --data) find the session the hooks use', () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-sd-data-'));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-sd-cwd-'));
+  const sid = 'sess-arch-' + path.basename(cwd);
+  const hookEnv = baseEnv({ CLAUDE_PLUGIN_DATA: data });
+  sessionStart({ session_id: sid, cwd, source: 'startup' }, hookEnv);
+  const planFile = path.join(cwd, 'plan.json');
+  fs.writeFileSync(planFile, JSON.stringify({ goal: 'g', verify: 'npm test', tasks: [{ id: 'T1', title: 't', files: ['a.js'], spec: 's', verify: 'npm test' }] }));
+  const out = cli(['plan', 'set', '--file', planFile], baseEnv({}), cwd);
+  assert.match(out, /plan: 1 tasks/);
+  assert.ok(fs.existsSync(path.join(data, 'sessions', sid, 'plan.json')), 'plan.json lands where SubagentStop reads it');
+});
+
+test('a configured XEND_STATE_DIR keeps its own mode; only xend\'s session dirs are made private', { skip: process.platform === 'win32' && 'POSIX modes' }, () => {
+  const shared = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-sd-shared-'));
+  fs.chmodSync(shared, 0o1777);
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-sd-cwd-'));
+  sessionStart({ session_id: 'sess-mode', cwd, source: 'startup' }, baseEnv({ XEND_STATE_DIR: shared }));
+  assert.equal(fs.statSync(shared).mode & 0o7777, 0o1777);
+  assert.equal(fs.statSync(path.join(shared, 'sess-mode')).mode & 0o777, 0o700);
+});

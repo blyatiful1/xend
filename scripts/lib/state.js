@@ -35,21 +35,24 @@ function baseDir(env) {
   return tmpBase();
 }
 
-// Every base a session's pointer may live under, most specific first.
+// Every base a session's pointer may live under, most specific first (an explicit XEND_STATE_DIR
+// is the only one, as it is where writeSessionPointers writes).
 function pointerRoots(env) {
   env = env || process.env;
+  if (env.XEND_STATE_DIR) return [env.XEND_STATE_DIR];
   const roots = [];
-  if (env.XEND_STATE_DIR) roots.push(env.XEND_STATE_DIR);
   if (env.CLAUDE_PLUGIN_DATA) roots.push(path.join(env.CLAUDE_PLUGIN_DATA, 'sessions'));
   roots.push(tmpBase());
   return roots.filter((r, i) => roots.indexOf(r) === i);
 }
 
-// mkdir's mode does not apply to a directory that already exists (one an earlier version made
-// 0755), so the mode is also set explicitly.
-function mkdirPrivate(d) {
+// Creates d (and missing parents) 0700. mkdir's mode does not apply to a directory that already
+// exists (one an earlier version made 0755), so with own=true the mode is also set explicitly;
+// only for directories xend owns (a session dir, its pointer dirs), never for a base directory
+// the user configured, such as XEND_STATE_DIR, which may be shared (/tmp).
+function mkdirPrivate(d, own) {
   try { fs.mkdirSync(d, { recursive: true, mode: 0o700 }); } catch (_) {}
-  try { fs.chmodSync(d, 0o700); } catch (_) {}
+  if (own) { try { fs.chmodSync(d, 0o700); } catch (_) {} }
 }
 
 // scratchpadDir: Claude Code's per-session scratch directory from the hook input when present
@@ -60,7 +63,7 @@ function sessionDir(sessionId, env, scratchpadDir) {
   if (env.XEND_STATE_DIR) d = path.join(env.XEND_STATE_DIR, safeId(sessionId));
   else if (scratchpadDir) d = path.join(scratchpadDir, 'xend');
   else d = path.join(baseDir(env), safeId(sessionId));
-  mkdirPrivate(d);
+  mkdirPrivate(d, true);
   return d;
 }
 
@@ -135,23 +138,29 @@ function pruneOld(env, maxAgeDays) {
 // Pointers so the CLI (running outside the hook's stdin, e.g. from a skill or a user shell) can
 // find a session's state dir without a --session argument: the most recent session started, and
 // the most recent one started from a given cwd. Best effort, never throws.
+// Written under the state base the hooks use and, when that differs, under the per-user temp base
+// too: a command the model runs through the Bash tool (the architect's `plan set` / `plan next`)
+// has neither CLAUDE_PLUGIN_DATA nor a --data argument, and finds the session from there.
 function writeSessionPointers(env, sessionId, dir, cwd) {
-  try {
-    const root = baseDir(env);
-    const payload = { id: sessionId, dir, cwd: cwd || '' };
-    mkdirPrivate(root);
-    writeJson(path.join(root, 'latest-session.json'), payload);
-    if (sessionId) {
-      mkdirPrivate(path.join(root, 'by-session'));
-      writeJson(path.join(root, 'by-session', safeId(sessionId) + '.json'), payload);
-    }
-    if (cwd) {
-      const cwdDir = path.join(root, 'by-cwd');
-      mkdirPrivate(cwdDir);
-      const key = crypto.createHash('sha1').update(String(cwd)).digest('hex');
-      writeJson(path.join(cwdDir, key + '.json'), payload);
-    }
-  } catch (_) {}
+  const roots = [baseDir(env)];
+  if (!env || !env.XEND_STATE_DIR) roots.push(tmpBase());
+  const payload = { id: sessionId, dir, cwd: cwd || '' };
+  for (const root of roots.filter((r, i) => roots.indexOf(r) === i)) {
+    try {
+      mkdirPrivate(root, false);
+      writeJson(path.join(root, 'latest-session.json'), payload);
+      if (sessionId) {
+        mkdirPrivate(path.join(root, 'by-session'), true);
+        writeJson(path.join(root, 'by-session', safeId(sessionId) + '.json'), payload);
+      }
+      if (cwd) {
+        const cwdDir = path.join(root, 'by-cwd');
+        mkdirPrivate(cwdDir, true);
+        const key = crypto.createHash('sha1').update(String(cwd)).digest('hex');
+        writeJson(path.join(cwdDir, key + '.json'), payload);
+      }
+    } catch (_) {}
+  }
 }
 
 // Resolve which session's state dir the CLI should use, in order: an explicit --session id;
@@ -170,14 +179,18 @@ function resolveSessionDir(opts) {
     const dir = findSessionDir(envId, env);
     if (dir) return { dir, id: envId, source: 'env' };
   }
-  const root = baseDir(env);
+  const roots = pointerRoots(env);
   if (cwd) {
     const key = crypto.createHash('sha1').update(String(cwd)).digest('hex');
-    const p = readJson(path.join(root, 'by-cwd', key + '.json'), null);
-    if (p && p.dir) return { dir: p.dir, id: p.id, source: 'cwd' };
+    for (const root of roots) {
+      const p = readJson(path.join(root, 'by-cwd', key + '.json'), null);
+      if (p && p.dir && fs.existsSync(p.dir)) return { dir: p.dir, id: p.id, source: 'cwd' };
+    }
   }
-  const latest = readJson(path.join(root, 'latest-session.json'), null);
-  if (latest && latest.dir) return { dir: latest.dir, id: latest.id, source: 'latest' };
+  for (const root of roots) {
+    const latest = readJson(path.join(root, 'latest-session.json'), null);
+    if (latest && latest.dir && fs.existsSync(latest.dir)) return { dir: latest.dir, id: latest.id, source: 'latest' };
+  }
   return { dir: null, id: null, source: null };
 }
 

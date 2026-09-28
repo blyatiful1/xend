@@ -23,7 +23,9 @@ function main() {
   if (!input) return;
 
   const dir = state.sessionDir(input.session_id, process.env, input.scratchpad_dir);
-  const cfg = state.readJson(path.join(dir, 'config.json'), null) || config.resolve({ cwd: input.cwd });
+  // resolved now, not read from the session's cached config.json, which the model may be able to
+  // write: trustTestCommands and the timeouts decide what runs without a prompt
+  const cfg = config.resolve({ cwd: input.cwd });
   const arch = cfg.architect || {};
   if (arch.verify === false) return;
   if (envDisabled(process.env.XEND_VERIFY)) return;
@@ -111,6 +113,9 @@ function main() {
           const timeout = Math.min(arch.verifyTimeoutMs || 120000, VERIFY_TIMEOUT_CAP_MS);
           const run = verify.runVerify(command, cwd, timeout);
           exit = run.exit; ms = run.ms; stdout = run.stdout; stderr = run.stderr;
+          // 126/127: the command could not be run here at all (a runner missing on this machine, a
+          // Windows shim): that verifies nothing either way, so it is not a mismatch to block on
+          if (exit === 126 || exit === 127) { allowed = false; skipped = 'not-runnable'; exit = null; }
         }
       }
     }

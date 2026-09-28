@@ -5,9 +5,16 @@
 //   - no deny or ask rule in any settings layer matches it (these always win), and
 //   - an allow rule matches it, or the session runs in bypassPermissions mode, or the user opted
 //     in at user level (trustTestCommands in ~/.config/xend/config.json, or XEND_TRUST_TESTS=1).
-// Layers read: managed (managed-settings.json and managed-settings.d/*.json), user
-// ($CLAUDE_CONFIG_DIR or ~/.claude), project and local (.claude/ under $CLAUDE_PROJECT_DIR, else
-// the git root, else cwd). Pure reads; never throws.
+// Allow rules are read only where Claude Code reads them: managed settings, the user's settings,
+// and the project root's .claude/settings.json and settings.local.json (the root is
+// $CLAUDE_PROJECT_DIR, else the git root, else cwd). A settings file under the current directory,
+// a ~/.claude left behind by a relocated CLAUDE_CONFIG_DIR, or the git root when it differs from
+// the project dir can add deny and ask rules, never allow rules: a cloned or vendored repository
+// inside the project must not be able to approve its own test command. When managed settings set
+// allowManagedPermissionRulesOnly, only managed allow rules count. Pure reads; never throws.
+//
+// Not visible from a hook, so not honoured here: rules given on the command line
+// (--disallowedTools, --settings), MDM or registry policy, and server-managed settings.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -36,35 +43,52 @@ function projectRoot(cwd, env) {
   return settings.findGitRoot(start) || start;
 }
 
-// Every settings file that can carry permission rules, most authoritative first.
+// Every settings file that can carry permission rules, most authoritative first. `allow: false`
+// marks a file whose deny and ask rules count but whose allow rules do not (see the header).
 function layerFiles(cwd, env, managed) {
+  env = env || process.env;
   const files = [];
+  const seen = new Set();
+  const add = (layer, file, allow) => {
+    const key = path.resolve(file);
+    if (seen.has(key)) return;
+    seen.add(key);
+    files.push({ layer, path: file, allow });
+  };
   const m = managed || managedDir();
-  files.push({ layer: 'managed', path: path.join(m, 'managed-settings.json') });
+  add('managed', path.join(m, 'managed-settings.json'), true);
   try {
     const dropIn = path.join(m, 'managed-settings.d');
-    for (const f of fs.readdirSync(dropIn).filter((x) => x.endsWith('.json')).sort()) {
-      files.push({ layer: 'managed', path: path.join(dropIn, f) });
-    }
+    for (const f of fs.readdirSync(dropIn).filter((x) => x.endsWith('.json')).sort()) add('managed', path.join(dropIn, f), true);
   } catch (_) {}
-  files.push({ layer: 'user', path: path.join(userDir(env), 'settings.json') });
-  const roots = [projectRoot(cwd, env)];
+  add('user', path.join(userDir(env), 'settings.json'), true);
+  // CLAUDE_CONFIG_DIR can come from a settings file's env block; the default location's deny and
+  // ask rules still count, so it cannot hide them
+  add('user', path.join(os.homedir(), '.claude', 'settings.json'), false);
+  const root = projectRoot(cwd, env);
+  add('project', path.join(root, '.claude', 'settings.json'), true);
+  add('local', path.join(root, '.claude', 'settings.local.json'), true);
   const here = path.resolve(cwd || process.cwd());
-  if (!roots.includes(here)) roots.push(here);
-  for (const r of roots) {
-    files.push({ layer: 'project', path: path.join(r, '.claude', 'settings.json') });
-    files.push({ layer: 'local', path: path.join(r, '.claude', 'settings.local.json') });
+  for (const r of [here, settings.findGitRoot(here)].filter(Boolean)) {
+    add('project', path.join(r, '.claude', 'settings.json'), false);
+    add('local', path.join(r, '.claude', 'settings.local.json'), false);
   }
   return files;
 }
 
 function loadRules(cwd, env, managed) {
   const out = { deny: [], ask: [], allow: [] };
+  const loaded = [];
   for (const f of layerFiles(cwd, env, managed)) {
     const j = settings.readJsonSafe(f.path);
-    const p = j && j.permissions;
+    if (j && typeof j === 'object') loaded.push({ f, j });
+  }
+  const managedOnly = loaded.some(({ f, j }) => f.layer === 'managed' && j.allowManagedPermissionRulesOnly === true);
+  for (const { f, j } of loaded) {
+    const p = j.permissions;
     if (!p || typeof p !== 'object') continue;
     for (const key of ['deny', 'ask', 'allow']) {
+      if (key === 'allow' && (!f.allow || (managedOnly && f.layer !== 'managed'))) continue;
       for (const rule of Array.isArray(p[key]) ? p[key] : []) {
         if (typeof rule === 'string') out[key].push({ rule, layer: f.layer, path: f.path });
       }
@@ -74,29 +98,38 @@ function loadRules(cwd, env, managed) {
 }
 
 // Runner spellings that run the same program: "python -m pytest" and "pytest", "npm run test" and
-// "npm test". Applied to both the rule and the command before matching.
+// "npm test". Used only to widen deny and ask rules; allow rules match literally.
 function normalize(cmd) {
   return String(cmd || '').trim().replace(/\s+/g, ' ')
     .replace(/^python3? -m (pytest|unittest)\b/, '$1')
-    .replace(/^(npm|pnpm|yarn) run test\b/, '$1 test');
+    .replace(/^(npm|pnpm|yarn) run test(?=\s|$)/, '$1 test');
+}
+
+function ruleRegex(spec) {
+  const esc = (x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  const prefix = spec.endsWith(':*');
+  const body = prefix ? spec.slice(0, -2) : spec;
+  let src = body.split('*').map(esc).join('.*');
+  if (prefix) src += '(?:\\s.*)?';
+  else if (body.endsWith(' *') && body.split('*').length === 2) src = src.slice(0, -3) + '(?: .*)?';
+  return new RegExp('^' + src + '$');
 }
 
 // A Claude Code permission rule for Bash tested against a command, the way Claude Code matches
 // it: "Bash" and "Bash(*)" match everything; "Bash(npm test:*)" matches "npm test" and
 // "npm test <args>" (a whole-word prefix); other "*" are globs, and a single trailing " *" also
 // matches the bare command ("Bash(npm test *)" covers "npm test"); anything else is exact.
-function bashRuleMatches(rule, cmd) {
+// opts.loose also tries both sides normalized (for deny and ask rules only).
+function bashRuleMatches(rule, cmd, opts) {
   const m = /^Bash(?:\((.*)\))?$/.exec(String(rule || '').trim());
   if (!m) return false;
   const spec = m[1] === undefined ? '' : m[1].trim();
   if (spec === '' || spec === '*') return true;
-  const esc = (s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-  const prefix = spec.endsWith(':*');
-  const body = normalize(prefix ? spec.slice(0, -2) : spec);
-  let src = body.split('*').map(esc).join('.*');
-  if (prefix) src += '(?:\\s.*)?';
-  else if (body.endsWith(' *') && body.split('*').length === 2) src = src.slice(0, -3) + '(?: .*)?';
-  return new RegExp('^' + src + '$').test(normalize(cmd));
+  const literal = String(cmd || '').trim().replace(/\s+/g, ' ');
+  if (ruleRegex(spec.replace(/\s+/g, ' ')).test(literal)) return true;
+  if (!(opts && opts.loose)) return false;
+  const specN = spec.endsWith(':*') ? normalize(spec.slice(0, -2)) + ':*' : normalize(spec);
+  return ruleRegex(specN).test(normalize(cmd));
 }
 
 // { ok, reason, rule? } -- reason is 'deny' | 'ask' | 'allow-rule' | 'bypass' | 'trusted' | 'no-rule'.
@@ -105,7 +138,7 @@ function check(cmd, opts) {
   let rules;
   try { rules = loadRules(opts.cwd, opts.env, opts.managedDir); } catch (_) { return { ok: false, reason: 'no-rule' }; }
   for (const key of ['deny', 'ask']) {
-    const hit = rules[key].find((r) => bashRuleMatches(r.rule, cmd));
+    const hit = rules[key].find((r) => bashRuleMatches(r.rule, cmd, { loose: true }));
     if (hit) return { ok: false, reason: key, rule: hit.rule, path: hit.path };
   }
   const allow = rules.allow.find((r) => bashRuleMatches(r.rule, cmd));
@@ -115,15 +148,21 @@ function check(cmd, opts) {
   return { ok: false, reason: 'no-rule' };
 }
 
-// The allow rule to suggest for a command: its runner words, as a ":*" prefix rule.
+// The allow rule to suggest for a command: a ":*" prefix rule on the test runner's own words
+// ("Bash(npm test:*)", "Bash(python3 -m pytest:*)"), and otherwise the exact command, never a
+// bare interpreter ("Bash(python3:*)" or "Bash(bash:*)" would approve any code at all).
+const PREFIX_RULES = [
+  /^python3? -m (pytest|unittest)(?=\s|$)/, /^pytest(?=\s|$)/, /^(npm|pnpm|yarn)( run)? test(?=\s|$)/,
+  /^node --test(?=\s|$)/, /^go test(?=\s|$)/, /^cargo (test|check)(?=\s|$)/, /^make (test|check)(?=\s|$)/,
+  /^ruff check(?=\s|$)/,
+];
 function suggestRule(cmd) {
-  const words = normalize(cmd).split(' ');
-  const n = /^(npm|pnpm|yarn|node|go|cargo|make|python3?)$/.test(words[0]) && words[1] && !words[1].startsWith('-') ? 2
-    : (words[0] === 'node' && words[1] === '--test') ? 2 : 1;
-  const original = String(cmd).trim().split(/\s+/);
-  // keep the command's own spelling ("python3 -m pytest") so the rule reads like what runs
-  const lead = /^python3? -m /.test(String(cmd).trim()) ? original.slice(0, 3) : original.slice(0, n);
-  return 'Bash(' + lead.join(' ') + ':*)';
+  const c = String(cmd || '').trim().replace(/\s+/g, ' ');
+  for (const re of PREFIX_RULES) {
+    const m = re.exec(c);
+    if (m) return 'Bash(' + m[0] + ':*)';
+  }
+  return 'Bash(' + c + ')';
 }
 
 // A one-line note for the user (a hook's systemMessage, which the model does not see), at most once

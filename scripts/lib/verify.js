@@ -177,9 +177,11 @@ const ALLOWLIST_RE = /^(python3?\s+-m\s+(pytest|unittest)|pytest|npm\s+(run\s+)?
 // An import smoke check: `python3 -c "import a.b"` or `python -c 'import a.b, c.d'`, one or more
 // dotted module names, nothing else.
 const IMPORT_SMOKE_RE = /^import\s+[\w.]+(?:\s*,\s*[\w.]+)*$/;
-// Commands run without a shell (see runVerify), so these would only ever reach a runner as literal
-// text; they are refused anyway, so that no command that looks like shell syntax is ever run.
-const FORBIDDEN_RE = /[;&|<>`$\\\n\r%^]/;
+// Commands run without a shell (see runVerify), so shell syntax would reach a runner as literal
+// text and mean something else than it does in bash; a command using any is refused instead. Inside
+// '...' everything is literal in bash too; inside "..." bash still expands $, ` and \.
+const UNQUOTED_FORBIDDEN_RE = /[;&|<>`$\\%^(){}]/;
+const DQUOTED_FORBIDDEN_RE = /[`$\\]/;
 
 // Flags a verify or test command may carry. Anything else makes the command unverifiable rather
 // than run: --basetemp, --rootdir, -c, -o, --junitxml, -exec, --script-shell, -r/--require, --fix,
@@ -192,6 +194,7 @@ const SAFE_FLAGS = new Set([
   '--stepwise', '--no-header', '--no-summary', '--disable-warnings', '--durations',
   '--durations-min', '--strict-markers', '--strict-config', '--runxfail', '--color', '--capture', '--showlocals',
   '--exitfirst', '--quiet', '--verbose', '--import-mode', '--timeout', '--locals', '--failfast', '--buffer',
+  '--no-cov', '--cov',
   // node --test
   '--test', '--test-reporter', '--test-name-pattern', '--test-concurrency', '--test-timeout', '--test-force-exit',
   // npm / pnpm / yarn, and common runner flags passed after `--`
@@ -213,28 +216,80 @@ const SAFE_FLAGS = new Set([
   '--show-error-codes', '--follow-imports',
 ]);
 
-// Splits a command into argv: whitespace-separated words, '...' and "..." quoting (no escapes,
-// no expansion). null when it is empty, unbalanced, or contains a FORBIDDEN_RE character.
+// Splits a command into argv the way bash would for the simple commands allowed here: words split
+// on whitespace, '...' and "..." quoting, an unquoted # starting a comment. null when it is empty,
+// unbalanced, spans lines, or uses shell syntax (UNQUOTED_FORBIDDEN_RE / DQUOTED_FORBIDDEN_RE).
+// argv.globs[i] is true when word i holds an unquoted * ? or [ that bash would expand (runVerify
+// expands it the same way).
 function parseCommand(cmd) {
   if (typeof cmd !== 'string') return null;
   const s = cmd.trim();
-  if (!s || FORBIDDEN_RE.test(s)) return null;
+  if (!s || /[\n\r\0]/.test(s)) return null;
   const argv = [];
-  let cur = null, quote = null;
+  const globs = [];
+  let cur = null, quote = null, glob = false;
+  const flush = () => { if (cur !== null) { argv.push(cur); globs.push(glob); } cur = null; glob = false; };
   for (const ch of s) {
     if (quote) {
-      if (ch === quote) quote = null; else cur += ch;
+      if (ch === quote) { quote = null; continue; }
+      if (quote === '"' && DQUOTED_FORBIDDEN_RE.test(ch)) return null;
+      cur += ch;
     } else if (ch === '"' || ch === "'") {
       quote = ch; if (cur === null) cur = '';
     } else if (/\s/.test(ch)) {
-      if (cur !== null) { argv.push(cur); cur = null; }
+      flush();
+    } else if (ch === '#' && cur === null) {
+      break;
     } else {
+      if (UNQUOTED_FORBIDDEN_RE.test(ch)) return null;
+      if (ch === '*' || ch === '?' || ch === '[') glob = true;
       cur = (cur === null ? '' : cur) + ch;
     }
   }
   if (quote) return null;
-  if (cur !== null) argv.push(cur);
-  return argv.length ? argv : null;
+  flush();
+  if (!argv.length) return null;
+  argv.globs = globs;
+  return argv;
+}
+
+// One glob path segment as a regex: * and ? within a name, [...] and [!...] classes.
+function segmentRe(seg) {
+  let re = '';
+  for (let i = 0; i < seg.length; i++) {
+    const c = seg[i];
+    if (c === '*') re += '[^/]*';
+    else if (c === '?') re += '[^/]';
+    else if (c === '[' && seg.indexOf(']', i + 2) !== -1) {
+      const j = seg.indexOf(']', i + 2);
+      let cls = seg.slice(i + 1, j).replace(/\\/g, '\\\\');
+      if (cls[0] === '!') cls = '^' + cls.slice(1);
+      re += '[' + cls + ']';
+      i = j;
+    } else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp('^' + re + '$');
+}
+
+// Pathname expansion as bash does it by default: the sorted matching paths under cwd, or the word
+// itself when nothing matches. Names starting with "." match only a pattern that does too.
+function expandGlob(word, cwd) {
+  const parts = word.split('/');
+  let bases = [''];
+  for (let k = 0; k < parts.length && bases.length; k++) {
+    const seg = parts[k];
+    const next = [];
+    for (const b of bases) {
+      if (!/[*?[]/.test(seg)) { next.push(b ? b + '/' + seg : seg); continue; }
+      let names = [];
+      try { names = fs.readdirSync(path.join(cwd, b || '.')); } catch (_) {}
+      const re = segmentRe(seg);
+      for (const n of names) if (re.test(n) && (!n.startsWith('.') || seg.startsWith('.'))) next.push(b ? b + '/' + n : n);
+    }
+    bases = next;
+  }
+  const hits = bases.filter((p) => { try { fs.statSync(path.join(cwd, p)); return true; } catch (_) { return false; } }).sort();
+  return hits.length ? hits : [word];
 }
 
 // A value that names a file must stay inside the project: relative, no "..", no "~".
@@ -256,6 +311,7 @@ function argsSafe(argv, runner) {
       const eq = a.indexOf('=');
       const name = eq === -1 ? a : a.slice(0, eq);
       if (python && /^-r[a-zA-Z]+$/.test(a)) { prevFlag = null; continue; }
+      if (python && /^-[qvxslb]{2,}$/.test(a)) { prevFlag = null; continue; } // combined short flags: -xvs
       if ((name === '--watch' || name === '--watchAll') && a !== name + '=false') return false;
       if (python && name.startsWith('-p') && name !== '-p' && !name.startsWith('--')) { if (!/^-pno:[\w.-]+$/.test(a)) return false; prevFlag = null; continue; }
       if (!SAFE_FLAGS.has(name)) return false;
@@ -264,6 +320,8 @@ function argsSafe(argv, runner) {
       continue;
     }
     if (python && prevFlag === '-p' && !/^no:[\w.-]+$/.test(a) && !a.includes('*')) return false;
+    // make variables (V=1, VERBOSE=1), but none that changes how make runs recipes
+    if (runner === 'make' && /^[A-Z][A-Z0-9_]*=[\w.,:+-]*$/.test(a) && !/^(SHELL|\.SHELLFLAGS|MAKE\w*|MFLAGS|GNUMAKEFLAGS)=/.test(a)) { prevFlag = null; continue; }
     if (a.includes('=') && !prevFlag) return false;
     if (!pathSafe(a)) return false;
     prevFlag = null;
@@ -285,6 +343,12 @@ function commandAllowed(cmd) {
   // tsc only type-checks (--noEmit), whatever else the flags say
   if (argv[0] === 'ruff' && argv.length > 1 && argv[1] !== 'check' && !(argv[1] === 'format' && argv.includes('--check'))) return false;
   if (argv[0] === 'tsc' && !argv.includes('--noEmit')) return false;
+  // the script or target is exactly `test` (or make's `check`): the allowlist's \b would also let
+  // `npm run test-deploy` or `make test install` through, which run other scripts and targets
+  if (/^(npm|pnpm|yarn)$/.test(argv[0]) && !(argv[1] === 'test' || (argv[1] === 'run' && argv[2] === 'test'))) return false;
+  if (argv[0] === 'make' && (!/^(test|check)$/.test(argv[1]) || argv.slice(2).some((a) => !a.startsWith('-') && !a.includes('=')))) return false;
+  if (argv[0] === 'cargo' && !/^(test|check)$/.test(argv[1])) return false;
+  if (argv[0] === 'go' && argv[1] !== 'test') return false;
   // the runner words themselves (e.g. "python3 -m pytest", "npm run test") are fixed by the allowlist
   const lead = /^python3?$/.test(argv[0]) && argv[1] === '-m' ? 3 : 1;
   return argsSafe(argv.slice(lead), argv[0]);
@@ -296,15 +360,17 @@ function capBuffer(buf, max) {
   return (b.length > max ? b.slice(0, max) : b).toString('utf8');
 }
 
-// Runs a command without a shell (argv from parseCommand), output capped at 64 KB each. On
-// Windows the npm/pnpm/yarn/npx shims are .cmd files, which only run through cmd.exe; those get a
-// shell, and only when every word is plain. A missing program reports exit 127, as a shell would.
-// Never throws.
+// Runs a command without a shell (argv from parseCommand, globs expanded as bash would), output
+// capped at 64 KB each. On Windows, npm, pnpm, yarn and the tools npm installs (tsc, eslint) are
+// .cmd shims, which only run through cmd.exe; those get a shell, and only when every word is
+// plain. A missing program reports exit 127, as a shell would. Never throws.
 function runVerify(cmd, cwd, timeoutMs) {
   const start = Date.now();
-  const argv = parseCommand(cmd);
-  if (!argv) return { exit: 126, stdout: '', stderr: 'xend: not a runnable command: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
-  const winShim = process.platform === 'win32' && /^(npm|pnpm|yarn|npx)$/i.test(argv[0]);
+  const parsed = parseCommand(cmd);
+  if (!parsed) return { exit: 126, stdout: '', stderr: 'xend: not a runnable command: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
+  const argv = [];
+  parsed.forEach((a, i) => { if (parsed.globs[i] && pathSafe(a)) argv.push(...expandGlob(a, cwd || process.cwd())); else argv.push(a); });
+  const winShim = process.platform === 'win32' && /^(npm|pnpm|yarn|npx|tsc|eslint)$/i.test(argv[0]);
   if (winShim && !argv.every((a) => /^[\w.:/@,+=*-]+$/.test(a))) {
     return { exit: 126, stdout: '', stderr: 'xend: not a runnable command on Windows: ' + String(cmd).slice(0, 200), ms: 0, timedOut: false };
   }

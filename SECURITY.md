@@ -16,7 +16,16 @@ Two hooks run commands, and a hook cannot show a permission prompt:
 Both run a command only when Claude Code itself would run it without asking: an allow rule in
 your settings matches it, the session is in `bypassPermissions` mode, or you set
 `"trustTestCommands": true` in `~/.config/xend/config.json` (or `XEND_TRUST_TESTS=1`). A deny or
-ask rule always wins. Commands must also pass a fixed allowlist of test runners and flags, run
+ask rule always wins. Allow rules count only from managed settings, your user settings and the
+project root's `.claude/` (only managed ones under `allowManagedPermissionRulesOnly`); a
+`.claude/settings.json` in a subdirectory adds deny and ask rules only. The trust setting and the
+auto-test's settings are resolved when the hook runs, never read from the session's cached
+config (which lives in a directory the model may be able to write).
+
+Known limits: a hook cannot see permission rules given on the command line (`--disallowedTools`,
+`--settings`), by MDM or registry policy, or by server-managed settings, so it cannot honour
+them. If you rely on those to forbid a test command, leave `trustTestCommands` off and do not run
+in `bypassPermissions` mode. Commands must also pass a fixed allowlist of test runners and flags, run
 without a shell, and may not name absolute, `~` or `..` paths. A repository's own `.xend.json`
 cannot enable the auto-test, choose its command or trust it.
 

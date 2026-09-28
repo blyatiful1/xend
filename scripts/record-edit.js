@@ -24,11 +24,14 @@ function main() {
 
   if (input.tool_name !== 'Edit' && input.tool_name !== 'MultiEdit') return;
   if (input.agent_id || /\/subagents\//.test(input.transcript_path || '')) return;
-  const cfg = state.readJson(path.join(dir, 'config.json'), null) || config.resolve({ cwd: input.cwd });
+  // Resolved now rather than read from the session's cached config.json: that file sits in a
+  // directory the model may be able to write (Claude Code's scratchpad), and these settings decide
+  // whether a command runs without a prompt.
+  const cfg = config.resolve({ cwd: input.cwd });
   const overrides = state.sessionOverrides(dir);
   if (overrides.enabled === false) return;
   const ac = cfg.autoTest || {};
-  if (!ac.enabled) return;
+  if (ac.enabled !== true) return;
   const root = input.cwd || process.cwd();
   const abs = path.resolve(root, f);
   let hint = null;

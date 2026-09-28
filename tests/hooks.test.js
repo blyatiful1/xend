@@ -93,3 +93,14 @@ test('post-tool-use: a limited read gets its note even when shaping is off for t
   // and with shaping off from the start, pre-read does not limit at all
   assert.equal(hook('pre-read.js', { hook_event_name: 'PreToolUse', session_id: 's6', cwd: d, tool_name: 'Read', tool_use_id: 'r2', tool_input: { file_path: path.join(d, 'a.txt') } }, { XEND_PROFILE: 'aggressive', XEND_SHAPE: '0' }), null);
 });
+
+test('record-edit: trust claimed in the session\'s cached config.json is ignored', () => {
+  const d = tmp(PASSING);
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-hk-state-'));
+  fs.mkdirSync(path.join(stateDir, 's7'), { recursive: true });
+  fs.writeFileSync(path.join(stateDir, 's7', 'config.json'), JSON.stringify({ trustTestCommands: true, autoTest: { enabled: true, command: 'node --test' } }));
+  const out = hook('record-edit.js', { hook_event_name: 'PostToolUse', session_id: 's7', cwd: d, tool_name: 'Edit', tool_use_id: 't1',
+    tool_input: { file_path: path.join(d, 'a.js') } }, { XEND_STATE_DIR: stateDir });
+  assert.equal(out.hookSpecificOutput, undefined, 'no test ran');
+  assert.match(out.systemMessage, /waiting for permission/);
+});

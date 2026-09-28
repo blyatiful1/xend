@@ -103,6 +103,17 @@ test('a repository .xend.json cannot turn auto-test on, pick its command, trust 
   assert.strictEqual(config.resolve({ env: {}, cwd: dir }).autoTest.enabled, false);
 }));
 
+test('a repository cannot turn the auto-test on through a truthy value or by choosing a profile', () => withUserConfig({ profile: 'lite' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xend-cfg-'));
+  for (const repo of [{ autoTest: { enabled: 1 } }, { autoTest: { enabled: 'yes' } }, { profile: 'balanced' }, { profile: 'aggressive', autoTest: { enabled: true } }]) {
+    fs.writeFileSync(path.join(dir, '.xend.json'), JSON.stringify(repo));
+    assert.strictEqual(config.resolve({ env: {}, cwd: dir }).autoTest.enabled, false, JSON.stringify(repo));
+  }
+  // the user's own choice still works
+  assert.strictEqual(config.resolve({ env: { XEND_AUTOTEST: '1' }, cwd: dir }).autoTest.enabled, true);
+  assert.strictEqual(config.resolve({ env: { XEND_PROFILE: 'balanced' }, cwd: dir }).autoTest.enabled, true);
+}));
+
 test('trustTestCommands comes from the environment or user config; timeouts are capped below the hook timeouts', () => {
   withUserConfig(null, () => {
     assert.strictEqual(config.resolve({ env: {}, cwd: os.tmpdir() }).trustTestCommands, false);

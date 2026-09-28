@@ -208,7 +208,7 @@ function projectLayer(json) {
   if (Object.prototype.hasOwnProperty.call(out, 'trustTestCommands')) { delete out.trustTestCommands; ignored.push('trustTestCommands'); }
   if (isObject(out.autoTest)) {
     const at = out.autoTest = Object.assign({}, out.autoTest);
-    if (at.enabled === true) { delete at.enabled; ignored.push('autoTest.enabled'); }
+    if ('enabled' in at && at.enabled !== false) { delete at.enabled; ignored.push('autoTest.enabled'); }
     for (const k of ['command', 'timeoutMs', 'maxMs']) if (k in at) { delete at[k]; ignored.push('autoTest.' + k); }
   }
   if (isObject(out.architect) && 'verifyTimeoutMs' in out.architect) {
@@ -244,7 +244,9 @@ function resolve(opts) {
 
   let profileName = 'balanced';
   for (const l of layers) if (l && PROFILES[l.profile]) profileName = l.profile;
-  let cfg = deepMerge({}, PROFILES[profileName]);
+  // a deep copy: deepMerge shares nested objects no layer overrides, and the lines below assign
+  // into cfg.autoTest and cfg.architect, which must never write through to PROFILES
+  let cfg = JSON.parse(JSON.stringify(PROFILES[profileName]));
   for (const l of layers) cfg = deepMerge(cfg, l);
   cfg.profile = profileName;
   if (!TERSE_LEVELS.includes(cfg.terse)) cfg.terse = PROFILES[profileName].terse;
@@ -261,6 +263,15 @@ function resolve(opts) {
     if (cfg.shape.dedupe && cfg.shape.dedupeWindow > cfg.contextEditing.keepToolUses) cfg.shape.dedupeWindow = cfg.contextEditing.keepToolUses;
   }
   cfg.trustTestCommands = cfg.trustTestCommands === true;
+  // The auto-test is on only if the user's own choice (profile and autoTest.enabled from the user
+  // config and the environment) turns it on: a repository picking a profile cannot, and it can
+  // only turn it off. Only a literal true counts.
+  if (isObject(cfg.autoTest)) {
+    let own = PROFILES.balanced.autoTest.enabled;
+    for (const l of [user, envLayer]) if (l && PROFILES[l.profile]) own = PROFILES[l.profile].autoTest.enabled;
+    for (const l of [user, envLayer]) if (l && isObject(l.autoTest) && 'enabled' in l.autoTest) own = l.autoTest.enabled === true;
+    cfg.autoTest.enabled = own === true && cfg.autoTest.enabled === true;
+  }
   if (isObject(cfg.autoTest)) cfg.autoTest.timeoutMs = Math.min(Number(cfg.autoTest.timeoutMs) || 20000, AUTOTEST_TIMEOUT_CAP_MS);
   cfg.architect.verifyTimeoutMs = Math.min(Number(cfg.architect.verifyTimeoutMs) || 120000, VERIFY_TIMEOUT_CAP_MS);
   cfg.sources = sources;
