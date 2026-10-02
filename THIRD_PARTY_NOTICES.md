@@ -106,3 +106,15 @@ Itemized adaptations:
    with xend's terse and reading rules; they reproduce no ponytail wording.
 
 xend ships **no** `SubagentStart` hook and does not port upstream's.
+
+## CPython standard library (bench fixture only)
+
+`bench/tasks/project-multifix-vendored/fixture/gen.sh` copies eight pure-Python modules
+(`textwrap`, `difflib`, `statistics`, `fractions`, `shlex`, `calendar`, `ipaddress`,
+`configparser`) from the Python installation running the benchmark into a scratch work
+directory, under new names, and changes one line or block in each to plant a bug for the
+model to find. Nothing from CPython is committed to this repository or shipped in the plugin;
+the copies exist only inside a benchmark run's temporary directory.
+
+The modules are Copyright (c) 2001 Python Software Foundation and are distributed under the
+Python Software Foundation License Version 2: https://docs.python.org/3/license.html

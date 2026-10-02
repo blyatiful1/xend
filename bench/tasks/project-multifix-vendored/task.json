@@ -1,0 +1,10 @@
+{
+  "name": "project-multifix-vendored",
+  "category": "project",
+  "difficulty": 3,
+  "prompt": "Several modules in the `kit` package have regressions: `python3 -m pytest -q tests` fails in more than one place. Each failing module has exactly one bug in its source. Find and fix every bug with the smallest correct change to the module's source; do not edit the tests and do not replace a module wholesale. A larger hidden test suite covering every module will be run afterwards.",
+  "timeout_s": 2400,
+  "max_turns": 150,
+  "budget_usd": 12,
+  "tools": "Bash,Read,Edit,Write,MultiEdit,Grep,Glob,Agent"
+}
