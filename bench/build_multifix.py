@@ -197,6 +197,7 @@ def build(name, bugs, prompt, session=None):
     for fn, text in (('fixture/gen.sh', gen_script(bugs)), ('reference/apply.sh', reference_script(name, bugs))):
         open(os.path.join(T, fn), 'w').write(text); os.chmod(os.path.join(T, fn), 0o755)
     tsh = open(os.path.join(ROOT, 'project-brownfield-softdelete', 'test.sh')).read()
+    assert tsh.count('TOTAL=56') == 1, 'project-brownfield-softdelete/test.sh changed: update the TOTAL rewrite here'
     tsh = tsh.replace('TOTAL=56', 'TOTAL=%d' % n_hidden).replace("whatever the agent (or reference/apply.sh) put under ./invsys.", "whatever the agent (or reference/apply.sh) left under ./kit.")
     open(os.path.join(T, 'test.sh'), 'w').write(tsh); os.chmod(os.path.join(T, 'test.sh'), 0o755)
     task = {"name": name, "category": "session" if session else "project", "difficulty": 3, "prompt": prompt,

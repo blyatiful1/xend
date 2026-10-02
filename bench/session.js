@@ -83,11 +83,18 @@ function normalizeSessionArm(a, defaults) {
   return arm;
 }
 
-// Pure: the claude argument list for one process of a session.
+// Pure: the claude argument list for one process of a session. --max-turns and --max-budget-usd bound
+// a process, so they are scaled to the messages that process will receive: a continuous session and
+// sixteen /clear processes then share one effective budget (task.max_turns and task.budget_usd are
+// per session; a clear-mode process gets 1/n of each, with at least 40 turns).
 function sessionArgs(task, arm, opts) {
   const ta = run.toolArgs((task.tools || 'Bash,Read,Edit,Write,MultiEdit,Grep,Glob') + (arm.extraTools ? ',' + arm.extraTools : ''), opts.toolset);
+  const n = Math.max(1, (task.session || []).length);
+  const share = arm.sessionMode === 'clear' ? 1 / n : 1;
+  const turns = Math.max(40, Math.ceil((task.max_turns || 400) * share));
+  const budget = Math.round((task.budget_usd || 30) * share * 100) / 100;
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
-    '--model', arm.model, '--max-turns', String(task.max_turns || 400), '--max-budget-usd', String(task.budget_usd || 30),
+    '--model', arm.model, '--max-turns', String(turns), '--max-budget-usd', String(budget),
     '--allowedTools', ta.allowedTools, '--strict-mcp-config', '--no-session-persistence'];
   if (ta.tools) args.push('--tools', ta.tools);
   if (opts.effort) args.push('--effort', opts.effort);
@@ -142,7 +149,12 @@ function accountEvent(stats, e, idx, proc) {
   if (e.type === 'assistant' && e.message) {
     const msg = e.message, u = msg.usage || {};
     const synthetic = msg.model === '<synthetic>' || (!(u.input_tokens || u.cache_read_input_tokens || u.cache_creation_input_tokens || u.output_tokens));
-    if (!e.parent_tool_use_id) {
+    // Streamed content blocks of one message arrive as separate events with the same id: each block is
+    // counted once (by id and block position), usage once per message.
+    const blockKey = (msg.id || '') + ':' + (e.parent_tool_use_id || '') + ':' + JSON.stringify((msg.content || []).map((c) => c.id || c.type));
+    const newBlock = !stats.seen.has(blockKey);
+    stats.seen.add(blockKey);
+    if (!e.parent_tool_use_id && newBlock) {
       for (const c of msg.content || []) {
         if (c.type === 'tool_use' && (c.name === 'Agent' || c.name === 'Task')) {
           pm.spawned++;
@@ -290,7 +302,7 @@ async function runSession(task, arm, opts, work, rawPath) {
   raw.write(JSON.stringify({ _runner: true, event: 'start', task: task.name, arm: arm.label, args, env_keys: Object.keys(env).sort(), session_mode: arm.sessionMode }) + '\n');
   const started = Date.now();
   if (arm.sessionMode === 'clear') {
-    for (let i = 0; i < messages.length && !stats.invalid; i++) await runProcess([messages[i]], i, args, env, work, Math.ceil(timeoutMs / messages.length) * 2, stats, raw);
+    for (let i = 0; i < messages.length && !stats.invalid; i++) await runProcess([messages[i]], i, args, env, work, Math.ceil(timeoutMs / messages.length), stats, raw);
   } else {
     await runProcess(messages, 0, args, env, work, timeoutMs, stats, raw);
   }
