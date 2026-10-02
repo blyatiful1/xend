@@ -112,6 +112,19 @@ function report(allRows, base) {
     out.push('', '## Subtasks not fixed (count over trials)', '');
     for (const [arm, ms] of Object.entries(misses)) out.push('- ' + arm + ': ' + Object.entries(ms).map(([m, c]) => m + ' x' + c).join(', '));
   }
+  // a task's own checks (score.py): mean of each numeric or boolean field per arm
+  const withChecks = valid.filter((r) => r.task_checks && !r.task_checks.error);
+  if (withChecks.length) {
+    const keys = [...new Set(withChecks.flatMap((r) => Object.keys(r.task_checks)))].filter((key) => withChecks.every((r) => ['number', 'boolean'].includes(typeof r.task_checks[key])));
+    out.push('', '## Task checks (mean per session; booleans as the share of sessions)', '');
+    out.push('| Arm | ' + keys.join(' | ') + ' |');
+    out.push('|---|' + '---|'.repeat(keys.length));
+    for (const arm of arms) {
+      const rs = withChecks.filter((r) => r.arm === arm);
+      if (!rs.length) continue;
+      out.push('| ' + arm + ' | ' + keys.map((key) => { const v = mean(rs.map((r) => Number(r.task_checks[key]))); return typeof rs[0].task_checks[key] === 'boolean' ? Math.round(v * 100) + '%' : v.toFixed(2); }).join(' | ') + ' |');
+    }
+  }
   const refs = valid.filter((r) => r.reference_hits);
   if (refs.length) out.push('', 'Sessions with commands that touched the standard library (see raw/): ' + refs.map((r) => r.arm + '#' + r.trial + ' (' + r.reference_hits + ')').join(', ') + '.');
   return out.join('\n') + '\n';

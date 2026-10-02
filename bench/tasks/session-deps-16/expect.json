@@ -1,0 +1,23 @@
+{
+ "tag": "KIT-2026.10",
+ "helper": "_round_half_even",
+ "modules": [
+  "wrap",
+  "dec",
+  "diffs",
+  "urls",
+  "stats",
+  "cli",
+  "ratio",
+  "pretty",
+  "lexer",
+  "plist",
+  "cal",
+  "globs",
+  "netaddr",
+  "heap",
+  "config",
+  "graph"
+ ],
+ "rule_from": 6
+}

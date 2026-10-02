@@ -222,3 +222,31 @@ build('session-multifix-16', B16,
       "exactly one bug in its source. Fix every bug with the smallest correct change to the module's source; do not edit the "
       'tests. ' + NO_REFERENCE,
       session=[SUBTASK.format(k=i + 1, n=len(B16), mod=b[1]) for i, b in enumerate(B16)])
+
+# The same sixteen subtasks, plus facts and rules that exist only in the conversation: what a long
+# session loses when compaction summarises it, and what delegation has to pass on to its workers.
+# Message 1 sets a rule (log every fix in CHANGES.txt) and gives a release tag that is asked for only
+# at the end; message 6 adds a rule (a regression test per fix from then on); a final message asks
+# for RELEASE.txt with the tag, the helper fixed in subtask 2, and the modules fixed. score.py grades
+# all of it from the work dir.
+DEPS_TAG = 'KIT-2026.10'
+DEPS_FIRST = ('Before we start, two things for this whole session. First, record every fix you make as one line in '
+              'CHANGES.txt at the repository root, in the form `<module>: <what was wrong>`. Second, the release tag '
+              'for this batch is ' + DEPS_TAG + '; I will ask you for it at the end.\n\n')
+DEPS_RULE = ('New rule from this subtask on: for every fix, also add a regression test named test_<module>_regression '
+             '(for example test_cli_regression) to tests/test_regressions.py; it must fail on the old code and pass '
+             'on the fixed code.\n\n')
+DEPS_LAST = ('Last step: write RELEASE.txt at the repository root. First line: the release tag I gave you at the '
+             'start of this session. Second line: the exact name of the helper function you fixed in kit/dec.py. '
+             'Then one line per module you fixed this session.')
+deps_msgs = [SUBTASK.format(k=i + 1, n=len(B16), mod=b[1]) for i, b in enumerate(B16)]
+deps_msgs[0] = DEPS_FIRST + deps_msgs[0]
+deps_msgs[5] = DEPS_RULE + deps_msgs[5]
+deps_msgs.append(DEPS_LAST)
+build('session-deps-16', B16,
+      'Sixteen modules in the `kit` package have regressions; `python3 -m pytest -q tests` fails in each of them. Each has '
+      "exactly one bug in its source. Fix every bug with the smallest correct change to the module's source; do not edit the "
+      'tests. ' + NO_REFERENCE,
+      session=deps_msgs)
+json.dump({'tag': DEPS_TAG, 'helper': '_round_half_even', 'modules': ORDER16, 'rule_from': 6},
+          open(os.path.join(ROOT, 'session-deps-16', 'expect.json'), 'w'), indent=1)
