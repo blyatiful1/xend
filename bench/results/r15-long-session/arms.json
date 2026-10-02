@@ -1,0 +1,66 @@
+[
+ {
+  "label": "solo",
+  "kind": "baseline",
+  "args": [
+   "--setting-sources",
+   "project,local"
+  ]
+ },
+ {
+  "label": "solo-clear",
+  "kind": "baseline",
+  "sessionMode": "clear",
+  "args": [
+   "--setting-sources",
+   "project,local"
+  ]
+ },
+ {
+  "label": "fork",
+  "kind": "baseline",
+  "env": {
+   "CLAUDE_CODE_FORK_SUBAGENT": "1"
+  },
+  "args": [
+   "--setting-sources",
+   "project,local",
+   "--append-system-prompt",
+   "This is a long session with many independent subtasks. Keep this main conversation's context small: for each subtask the user gives you, do not read or edit the code yourself; hand the whole subtask to a subagent with the Agent tool and reply with a one-line summary of its result. Use subagent_type \"fork\": it inherits this conversation, so the prompt only needs to name the subtask."
+  ]
+ },
+ {
+  "label": "sub",
+  "kind": "baseline",
+  "args": [
+   "--setting-sources",
+   "project,local",
+   "--append-system-prompt",
+   "This is a long session with many independent subtasks. Keep this main conversation's context small: for each subtask the user gives you, do not read or edit the code yourself; hand the whole subtask to a subagent with the Agent tool and reply with a one-line summary of its result. Use the general-purpose subagent with a self-contained prompt: the subtask text and how to check it."
+  ]
+ },
+ {
+  "label": "lean-sub",
+  "kind": "baseline",
+  "args": [
+   "--setting-sources",
+   "project,local",
+   "--agents",
+   "{\"fixer\":{\"description\":\"Fixes one failing test module: give it the subtask text.\",\"prompt\":\"You fix one failing test module in a Python package. Run the named test file, find the bug in the named module from the failure and the code, make the smallest correct change, rerun the tests, and reply in at most three lines: what was wrong, the change, the test result.\",\"tools\":[\"Bash\",\"Read\",\"Edit\",\"Grep\",\"Glob\"],\"model\":\"inherit\"}}",
+   "--append-system-prompt",
+   "This is a long session with many independent subtasks. Keep this main conversation's context small: for each subtask the user gives you, do not read or edit the code yourself; hand the whole subtask to a subagent with the Agent tool and reply with a one-line summary of its result. Use the \"fixer\" subagent with a self-contained prompt: the subtask text."
+  ]
+ },
+ {
+  "label": "lean-haiku",
+  "kind": "baseline",
+  "args": [
+   "--setting-sources",
+   "project,local",
+   "--agents",
+   "{\"fixer\":{\"description\":\"Fixes one failing test module: give it the subtask text.\",\"prompt\":\"You fix one failing test module in a Python package. Run the named test file, find the bug in the named module from the failure and the code, make the smallest correct change, rerun the tests, and reply in at most three lines: what was wrong, the change, the test result.\",\"tools\":[\"Bash\",\"Read\",\"Edit\",\"Grep\",\"Glob\"],\"model\":\"haiku\"}}",
+   "--append-system-prompt",
+   "This is a long session with many independent subtasks. Keep this main conversation's context small: for each subtask the user gives you, do not read or edit the code yourself; hand the whole subtask to a subagent with the Agent tool and reply with a one-line summary of its result. Use the \"fixer\" subagent with a self-contained prompt: the subtask text."
+  ]
+ }
+]

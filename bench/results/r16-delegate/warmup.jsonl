@@ -1,0 +1,3 @@
+{"arm":"baseline","cache_creation":5502,"cache_read":20287,"cost_usd":0.0268534,"errors":[],"autocompact_state":null}
+{"arm":"xend","cache_creation":5968,"cache_read":20753,"cost_usd":0.028810600000000002,"errors":[],"autocompact_state":null}
+{"arm":"xend-delegate","cache_creation":6102,"cache_read":20887,"cost_usd":0.0293734,"errors":[],"autocompact_state":null}

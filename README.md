@@ -12,10 +12,12 @@ No proxy, no daemon, no database, no account. Node.js 18+ is the only dependency
 
 ## At a glance
 
-Measured on Claude Sonnet 5 in paired runs, the same tasks in every arm of one pass (plugin rows on 0.3.0; 0.4.0 changes only output shaping, checked on real outputs in the last row):
+Measured in paired runs, the same tasks in every arm of one pass. The first two rows are 0.5.0 on Claude Sonnet 5.5; the rest are Claude Sonnet 5 (plugin rows on 0.3.0; 0.4.0 changes only output shaping, checked on real outputs in the last row):
 
 | Where | Result |
 |---|---|
+| Long sessions (16 independent subtasks in one session, Sonnet 5.5) | **-14.6% per session** against plain Claude Code (95% CI -23.6% to -3.0%), 15% fewer tokens, every subtask done in both (6 paired sessions) |
+| The same long sessions with `/xend:delegate on` | **-50% tokens** (CI -55% to -43%) and -16.7% cost (CI -30.0% to 0.0%) against plain Claude Code; the main context never compacted (2.0 compactions per session without it); every subtask done |
 | Long builds (multi-file projects, ~25 turns) | **-15.9% per task** against plain Claude Code, every hidden test passing in both (6 paired runs; 95% CI -39.6% to -2.5%) |
 | Short tasks (bugfix, feature, Q&A, ~4 turns) | cost-neutral (-1.2%, CI -4.4% to +3.1%), with the pass rate up from 91.7% to 96.4% and 11.6% fewer output tokens (84 paired runs) |
 | xend 0.3.0 against 0.2.0 | **-9.1%** on short tasks (CI -12.7% to -4.7%) |
@@ -89,21 +91,25 @@ documentation:
   (-5.5% cost on its own; bugfixes went from four turns to three).
 - **Keep what loads every session short.** Long CLAUDE.md files, unused MCP servers and chatty
   hooks are paid on every turn. `/xend:doctor` lists them, largest first.
-- **Use subagents for bulky reading, not small edits.** A subagent starts with a cold context of
-  its own. In [Systima's measurements](https://systima.ai/blog/subagent-tax), two subagents
-  multiplied tokens by 2.6x on Opus and 5.9x on Fable.
+- **Delegate in long sessions, not in single tasks.** In a session that works through many
+  independent subtasks, `/xend:delegate on` hands each one to a lean worker on your own model, so
+  the main context stays small and stops compacting: half the tokens of plain Claude Code in
+  bench r16. For a single task, any orchestration costs more (+9% to +186% on Sonnet 5.5, whether
+  forks, general-purpose subagents, the Workflow tool or orchestration plugins), and cheap Haiku
+  workers cost more too (+35%, slower, a subtask missed).
 
 ## What it does
 
 | Layer | Mechanism | Where it lives |
 |---|---|---|
 | Measure | session stats from Claude Code's transcript (tokens, cache hit ratio, cost by model, largest tool results, re-reads); static audit of memory files, settings, MCP servers and per-turn hooks with ranked fixes | `/xend:stats`, `/xend:doctor` |
-| Stay small | the whole per-session footprint is ~413 cache-write tokens (a 709-byte session block and two one-line builder descriptions), down from ~1,400; utilities are user-only skills, which Claude Code does not list to the model | session block, `extras/` |
+| Stay small | the whole per-session footprint is ~470 cache-write tokens (a 709-byte session block and three one-line agent descriptions; measured in bench r16), down from ~1,400; utilities are user-only skills, which Claude Code does not list to the model | session block, `extras/` |
 | Say less | caveman-compatible terse style (`lite`, `full`, `ultra`); code, commands, paths, errors and numbers stay exact, and anything written to files, commits or PRs stays in normal prose | session block, `/xend:terse` |
 | Take fewer turns | after an `Edit`, run the project's quick tests and hand the result to the model with the edit, so it does not spend a turn running them; only a command Claude Code would run without asking (an allow rule such as `Bash(npm test:*)`, which approving the command once with "don't ask again" writes), bounded, and off when the suite is slow; a work rule against read-backs and searches for files the task already names | PostToolUse hook, session block |
 | Read less | deterministic, recoverable shaping of tool results: escape codes, progress bars, repeated lines, passing-test rows and install chatter removed; past the size limit, grep hits that repeat in a file merged onto one line with every line number, log lines that differ only in numbers folded to the first and last with a count, and only then a head and tail cut that keeps the error lines from the middle, with the original saved and named; byte-identical command re-runs shortened; grep/glob lists capped with truthful totals; every marker explains itself and says whether anything was left out | PostToolUse hook (`updatedToolOutput`) |
 | Reset cheaply | a checkpoint (edited files, verification commands, decisions) written before compaction and re-injected after `/compact` or `/clear`, so `/clear` becomes the default way to end a task | PreCompact hook, `/xend:checkpoint` |
 | Native levers | Bash output cap, MCP output cap, a `# Compact instructions` section, and (aggressive) Anthropic's server-side clearing of old tool results; which prompt-cache lifetime is cheaper for you, replayed from your own transcripts | `/xend:setup`, `/xend:doctor`, `/xend:stats --cache-ttl` |
+| Keep long sessions small (opt-in) | delegate mode: one more paragraph in the session block tells the main session to hand each self-contained subtask to `xend-subtask`, a lean agent on the caller's model (Bash, Read, Edit, Write, Grep, Glob; a three-line report), and to answer quick questions itself | `/xend:delegate on`, `XEND_DELEGATE=1` |
 | Opt-in | lean build rules adapted from ponytail (`/xend:ponytail full`); architect mode, where the main model plans and verified Haiku/Sonnet builders implement (`/xend:plan on`); Haiku scout/reader and Sonnet reviewer agents (`extras/agents/`, copy to use) | [measured below](#tested-and-left-out) |
 
 What xend never does: rewrite your prompts, rewrite memory files into telegraphic prose, alter a `Read` result, summarize tool output with a model, run a command that is not on its allowlist or that Claude Code would ask you about, install another plugin unless you ask for it by name, switch the main session's model, or lower effort globally. Each of those has evidence against it (see the rejected list in `docs/RESEARCH.md`).
@@ -132,6 +138,8 @@ xend's design comes from measuring the alternatives. Among them (full evidence t
 | Generated project overview files | +20% on average, no gain in success (ETH Zürich, arXiv 2602.11988) | `/xend:doctor` audits memory files instead of adding to them |
 | Lean-code rules (ponytail) | -10.3% on code-heavy tasks (JetBrains), no saving on xend's short tasks | available opt-in: `/xend:ponytail full` |
 | Architect mode (a planner model with cheap builder subagents) | +39% to +251% on the project tasks | works, but costs more at this task size; opt-in: `/xend:plan on` |
+| Orchestrating a single task: forks, general-purpose subagents, the Workflow tool, superpowers or oh-my-claudecode | +9% to +186% per task on Sonnet 5.5 (bench r13, r14), every hidden test passing in every arm | Sonnet 5.5 finishes these tasks in about four turns; every subagent pays a prefix and the parent pays turns to brief it. Delegation pays only in long sessions (`/xend:delegate on`) |
+| Haiku workers for delegated subtasks | +34.5% per long session (bench r15), 4x slower, one subtask missed | more turns per subtask than they save in price; `xend-subtask` runs on the caller's model |
 
 ## Guarantees
 

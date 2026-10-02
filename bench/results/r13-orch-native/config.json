@@ -1,0 +1,96 @@
+{
+  "opts": {
+    "arms": [
+      "baseline",
+      "xend"
+    ],
+    "runs": 1,
+    "model": "claude-sonnet-5-5",
+    "effort": "medium",
+    "tasks": "project-*",
+    "category": "",
+    "concurrency": 3,
+    "maxBudget": 2,
+    "tools": "",
+    "toolset": "local",
+    "warmup": true,
+    "armsFile": "/tmp/claude-0/-home-user-xend/a84de686-d705-58b9-a7e6-8388d2dfde77/scratchpad/orch/arms-native.json",
+    "profile": "balanced",
+    "ponytail": "",
+    "ponytailText": "",
+    "ponytailStrict": false,
+    "armEnv": "",
+    "out": "bench/results/r13-orch-native",
+    "keep": false,
+    "dryRun": false,
+    "list": false,
+    "extra": [],
+    "arm_env": {}
+  },
+  "arms": [
+    {
+      "label": "solo",
+      "kind": "baseline",
+      "model": "claude-sonnet-5-5",
+      "mode": "plain",
+      "args": [
+        "--setting-sources",
+        "project,local"
+      ]
+    },
+    {
+      "label": "fork",
+      "kind": "baseline",
+      "model": "claude-sonnet-5-5",
+      "mode": "plain",
+      "env": {
+        "CLAUDE_CODE_FORK_SUBAGENT": "1"
+      },
+      "args": [
+        "--setting-sources",
+        "project,local"
+      ],
+      "promptSuffix": "Orchestrate this: read the spec yourself, then hand each independent module to a fork subagent (Agent tool, subagent_type \"fork\"; forks inherit your context, so the prompt only says what to build and how to check it). Run independent forks in parallel, then integrate and run the full test suite yourself."
+    },
+    {
+      "label": "fresh-sub",
+      "kind": "baseline",
+      "model": "claude-sonnet-5-5",
+      "mode": "plain",
+      "args": [
+        "--setting-sources",
+        "project,local"
+      ],
+      "promptSuffix": "Orchestrate this: read the spec yourself, then hand each independent module to a general-purpose subagent (Agent tool) with a self-contained brief: what to build and how to check it. Run independent subagents in parallel, then integrate and run the full test suite yourself."
+    },
+    {
+      "label": "workflow",
+      "kind": "baseline",
+      "model": "claude-sonnet-5-5",
+      "mode": "plain",
+      "args": [
+        "--setting-sources",
+        "project,local"
+      ],
+      "promptSuffix": "Use a workflow to orchestrate this: read the spec yourself, then run a Workflow script whose agents each build one independent module and check it; integrate and run the full test suite yourself afterwards.",
+      "extraTools": "Workflow"
+    },
+    {
+      "label": "xend-arch",
+      "kind": "xend",
+      "model": "claude-sonnet-5-5",
+      "mode": "architect",
+      "args": [
+        "--setting-sources",
+        "project,local"
+      ]
+    }
+  ],
+  "tasks": [
+    "project-brownfield-softdelete",
+    "project-ledger-cli",
+    "project-log-pipeline"
+  ],
+  "claude_version": "2.1.287 (Claude Code)",
+  "started": "2026-10-02T05:56:58.101Z"
+}

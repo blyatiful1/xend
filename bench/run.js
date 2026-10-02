@@ -17,9 +17,10 @@
 // global --model for that arm. mode (xend only) is `architect` (XEND_ARCHITECT=1: main model plans,
 // subagents build) or `plain` (default, XEND_ARCHITECT=0). kind may also be `xend@<dir>` to load the
 // plugin from another checkout (e.g. the previous release), so old and new xend run in one paired pass.
-// --arms-file takes a JSON array of {label, kind, model, mode, pluginDir, env, args}: env is set for
+// --arms-file takes a JSON array of {label, kind, model, mode, pluginDir, env, args, promptSuffix, extraTools}: env is set for
 // that arm whatever its kind (e.g. {"CLAUDE_CODE_PROMPT_CACHE_TTL": "5m"} on a baseline arm), args
-// are extra `claude` arguments. --help prints this; an unknown argument stops before any job runs.
+// are extra `claude` arguments, promptSuffix is appended to the task prompt (an orchestration
+// request the user would type), extraTools adds tools to that arm's set. --help prints this; an unknown argument stops before any job runs.
 //
 // Environment: every child runs as a plain local `claude -p` (the hosting session's entrypoint and
 // session variables are removed) with an explicit, local-like tool set (--toolset local, the default)
@@ -109,6 +110,8 @@ function normalizeArm(a, defaults) {
   if (kind === 'xend' && a.pluginDir) arm.pluginDir = a.pluginDir;
   if (a.env && typeof a.env === 'object') arm.env = Object.assign({}, a.env);
   if (Array.isArray(a.args) && a.args.length) arm.args = a.args.map(String);
+  if (a.promptSuffix) arm.promptSuffix = String(a.promptSuffix);
+  if (a.extraTools) arm.extraTools = String(a.extraTools);
   return arm;
 }
 
@@ -167,18 +170,24 @@ function prepareFixture(task, workRoot) {
   return work;
 }
 
-function cleanEnv(extra) {
-  const env = Object.assign({}, process.env, extra);
-  // The baseline arm is structurally immune (it gets no --plugin-dir), so an ambient export
-  // — or an upstream ponytail install on the operator's machine — would contaminate one side
-  // only and look like a real effect.
-  // CLAUDE_CODE_ENTRYPOINT: a child inheriting the hosting session's entrypoint (e.g. a cloud
-  // session's) gets that host's system prompt and side requests instead of a plain `claude -p`'s.
-  for (const k of ['CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'XEND_PROFILE', 'XEND_TERSE', 'XEND_SHAPE',
-    'XEND_PONYTAIL', 'XEND_PONYTAIL_TEXT', 'XEND_UPSTREAM_PONYTAIL', 'XEND_PONYTAIL_STRICT', 'PONYTAIL_DEFAULT_MODE', 'XEND_ARCHITECT',
-    'XEND_TRUST_TESTS', 'XEND_AUTOTEST', 'XEND_AUTOTEST_CMD',
-    // an ambient cache-lifetime choice would change what every arm pays; an arm sets it explicitly
-    ...CACHE_TTL_VARS]) delete env[k];
+// A child never inherits the operator's environment: a hosted session (Claude Code on the web, a CI
+// runner) exports variables that change what every arm does: MAX_THINKING_TOKENS=31999 (fixed
+// thinking instead of adaptive), background-task and compaction overrides, its own entrypoint and
+// session ids. Only the variables needed to reach the API (proxy and CA settings) and to run tools
+// pass through; everything an arm needs is set explicitly in `extra`. Runs before r15 inherited the
+// host environment minus a short denylist, so their arms all ran with that host's settings.
+const ENV_ALLOW = ['PATH', 'HOME', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'USER', 'TMPDIR', 'TZ',
+  'HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy', 'NO_PROXY', 'no_proxy', 'GLOBAL_AGENT_HTTPS_PROXY', 'GLOBAL_AGENT_NO_PROXY',
+  'SSL_CERT_FILE', 'NODE_EXTRA_CA_CERTS', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'PIP_CERT', 'GIT_SSL_CAINFO',
+  // credentials and provider selection, for runners that authenticate from the environment
+  'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_CUSTOM_HEADERS', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR',
+  'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'AWS_REGION', 'AWS_PROFILE', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN',
+  'ANTHROPIC_VERTEX_PROJECT_ID', 'CLOUD_ML_REGION', 'GOOGLE_APPLICATION_CREDENTIALS'];
+
+function cleanEnv(extra, source) {
+  source = source || process.env;
+  const env = {};
+  for (const k of ENV_ALLOW) if (source[k] != null) env[k] = source[k];
   return Object.assign(env, extra);
 }
 
@@ -207,9 +216,10 @@ function jobEnv(arm, opts, stateDir, allowedTools) {
 }
 
 function runClaude(task, arm, opts, work, stateDir) {
-  const ta = toolArgs(opts.tools || task.tools || TOOLS, opts.toolset);
+  const ta = toolArgs((opts.tools || task.tools || TOOLS) + (arm.extraTools ? ',' + arm.extraTools : ''), opts.toolset);
   const budget = task.budget_usd != null ? task.budget_usd : opts.maxBudget;
-  const args = ['-p', task.prompt, '--model', arm.model, '--max-turns', String(task.max_turns || 40),
+  const prompt = arm.promptSuffix ? task.prompt + '\n\n' + arm.promptSuffix : task.prompt;
+  const args = ['-p', prompt, '--model', arm.model, '--max-turns', String(task.max_turns || 40),
     '--max-budget-usd', String(budget), '--output-format', 'json', '--allowedTools', ta.allowedTools,
     '--strict-mcp-config', '--no-session-persistence'];
   if (ta.tools) args.push('--tools', ta.tools);
@@ -356,6 +366,7 @@ async function runJob(job, opts, outDir, workRoot) {
     ponytail_strict: arm.kind === 'xend' ? !!opts.ponytailStrict : false,
     arm_env: Object.assign({}, arm.kind === 'xend' ? opts.arm_env || {} : {}, arm.env || {}),
     arm_args: arm.args || null,
+    arm_prompt_suffix: arm.promptSuffix || null,
     answer_chars: (j.result || '').length,
     ts: new Date().toISOString(),
   };
@@ -442,4 +453,4 @@ async function main() {
 function claudeVersion() { try { return execFileSync('claude', ['--version'], { timeout: 10000 }).toString().trim(); } catch (_) { return 'unknown'; } }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, normalizeArm, toolArgs, parseScore, splitCost, parseArmEnv, jobEnv, cleanEnv, TOOLSETS };
+module.exports = { ROOT, ENV_ALLOW, prepareFixture, runTest, claudeVersion, loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, normalizeArm, toolArgs, parseScore, splitCost, parseArmEnv, jobEnv, cleanEnv, TOOLSETS };

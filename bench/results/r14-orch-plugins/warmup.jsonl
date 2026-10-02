@@ -1,0 +1,8 @@
+{"arm":"solo","cost_usd":0.0198686,"cache_creation":3710,"cache_read":21203,"ok":true,"ts":"2026-10-02T06:11:08.753Z"}
+{"arm":"fork","cost_usd":0.020714200000000002,"cache_creation":3808,"cache_read":21221,"ok":true,"ts":"2026-10-02T06:11:16.556Z"}
+{"arm":"fresh-sub","cost_usd":0.020225600000000003,"cache_creation":3795,"cache_read":21288,"ok":true,"ts":"2026-10-02T06:11:23.629Z"}
+{"arm":"workflow","cost_usd":0.09530170000000002,"cache_creation":1139,"cache_read":21613,"ok":true,"ts":"2026-10-02T06:11:37.172Z"}
+{"arm":"superpowers","cost_usd":0.0289904,"cache_creation":5882,"cache_read":23372,"ok":true,"ts":"2026-10-02T06:11:44.279Z"}
+{"arm":"superpowers-sdd","cost_usd":0.0290786,"cache_creation":5903,"cache_read":23393,"ok":true,"ts":"2026-10-02T06:11:51.532Z"}
+{"arm":"omc-autopilot","cost_usd":0.0358642,"cache_creation":7521,"cache_read":24961,"ok":true,"ts":"2026-10-02T06:11:59.651Z"}
+{"arm":"advisor-opus","cost_usd":0.0256122,"cache_creation":5073,"cache_read":22561,"ok":true,"ts":"2026-10-02T06:12:06.671Z"}

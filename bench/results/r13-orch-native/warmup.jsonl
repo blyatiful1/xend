@@ -1,0 +1,5 @@
+{"arm":"solo","cost_usd":0.053346199999999996,"cache_creation":12520,"cache_read":12391,"ok":true,"ts":"2026-10-02T05:57:05.321Z"}
+{"arm":"fork","cost_usd":0.055197800000000005,"cache_creation":12680,"cache_read":12449,"ok":true,"ts":"2026-10-02T05:57:13.461Z"}
+{"arm":"fresh-sub","cost_usd":0.0202382,"cache_creation":3798,"cache_read":21291,"ok":true,"ts":"2026-10-02T05:57:20.653Z"}
+{"arm":"workflow","cost_usd":0.0633166,"cache_creation":14668,"cache_read":14433,"ok":true,"ts":"2026-10-02T05:57:28.892Z"}
+{"arm":"xend-arch","cost_usd":0.0234722,"cache_creation":4568,"cache_read":22061,"ok":true,"ts":"2026-10-02T05:57:36.511Z"}

@@ -1,0 +1,29 @@
+[
+ {
+  "label": "baseline",
+  "kind": "baseline",
+  "args": [
+   "--setting-sources",
+   "project,local"
+  ]
+ },
+ {
+  "label": "xend",
+  "kind": "xend",
+  "args": [
+   "--setting-sources",
+   "project,local"
+  ]
+ },
+ {
+  "label": "xend-delegate",
+  "kind": "xend",
+  "env": {
+   "XEND_DELEGATE": "1"
+  },
+  "args": [
+   "--setting-sources",
+   "project,local"
+  ]
+ }
+]

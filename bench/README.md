@@ -33,10 +33,15 @@ node bench/analyze.js bench/results/<run> --md report.md
 
 ### Environment
 
-Each child is a plain local `claude -p`: the runner removes the hosting session's variables
-(`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_ENTRYPOINT`, ...). `CLAUDE_CODE_ENTRYPOINT`
-matters most: a child that inherits a cloud session's entrypoint gets that host's tool set, system
-prompt and a side request per run, in both arms. `--toolset local` (the default) passes an explicit
+Each child is a plain local `claude -p`. Since r15 a child's environment is built from an allowlist
+(`ENV_ALLOW` in `run.js`: `PATH`, `HOME`, proxy and CA variables, and the credential and provider
+variables a runner may authenticate with, such as `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` and the
+Bedrock and Vertex settings) plus what its arm sets, never inherited: a cloud session exports `CLAUDE_CODE_ENTRYPOINT` (that host's tool set, system prompt and a
+side request per run), `MAX_THINKING_TOKENS=31999` (fixed instead of adaptive thinking), and
+background-task and compaction overrides, all of which reached every arm of earlier runs through the
+old denylist. Run in a cloud container where xend is enabled in `~/.claude/settings.json`, pass
+`--extra "--setting-sources project,local"` (or put it in each arm's `args`) so the baseline does not
+load the installed plugin. `--toolset local` (the default) passes an explicit
 `--tools` list shaped like a local session (`Agent, Bash, Edit, Glob, Grep, NotebookEdit, Read,
 Skill, WebFetch, WebSearch, Write`, plus the task's own tools) and pre-approves all of it;
 `--allowedTools` alone only pre-approves and does not stop host tools from being listed.
@@ -61,7 +66,7 @@ An arm is either the legacy bare label (`baseline`, `xend` — kind = label, mod
 the previous release and the working tree run in the same paired pass (`git worktree add ../xend-main
 origin/main`, then `--arms "baseline,old:xend@../xend-main:sonnet,new:xend:sonnet"`). For per-arm
 environment (ablations such as auto-test off) use `--arms-file`, a JSON array of `{label, kind, model,
-mode, pluginDir, env, args}`:
+mode, pluginDir, env, args, promptSuffix, extraTools}`:
 
 ```json
 [{"label": "baseline", "kind": "baseline"},
@@ -70,7 +75,10 @@ mode, pluginDir, env, args}`:
 ```
 
 An entry's `env` reaches its arm whatever its kind, so two plain Claude Code arms can differ in one
-Claude Code setting; `args` are extra `claude` arguments for that arm. The cache-lifetime runs
+Claude Code setting; `args` are extra `claude` arguments for that arm. `promptSuffix` is appended
+to every task prompt in that arm (an orchestration request as a user would type it, such as "use a
+workflow"), and `extraTools` adds tools to that arm's set (`"Workflow"`); each record keeps the
+suffix in `arm_prompt_suffix`. The orchestration runs (`bench/results/r13-*`) use both. The cache-lifetime runs
 (`bench/results/r12-*`) used a distinct system-prompt line per arm so the arms could not share
 cache entries, and every run records the lifetime its writes were billed at (`cache_write_1h`,
 `cache_write_5m`); an ambient lifetime setting never reaches a child:
@@ -99,6 +107,37 @@ A `task.json` can carry `"tools": "Bash,Read,...,Agent"` and/or `"budget_usd": N
 ### The `SCORE:` contract
 
 A `test.sh` that only needs pass/fail should exit 0 on a correct solution, non-zero otherwise, same as any task. A `test.sh` that grades partial credit (hidden test suites, `project` tasks) should also print a line matching `^SCORE:\s*(\d+)\s*/\s*(\d+)` (anywhere in stdout or stderr, even when the script exits non-zero) — e.g. `echo "SCORE: 8/10"`. `run.js` records that as `score` (a 0..1 fraction) plus `score_passed`/`score_total`; `pass`/exit-code keeps its usual meaning regardless. Tasks without a `SCORE:` line get `score = pass`, so `analyze.js` can always use `score`.
+
+## Long sessions (`session.js`)
+
+`run.js` gives each task one prompt. `session.js` replays a task's `session` list (one message per
+subtask) as consecutive user turns of one Claude Code session, through `--input-format stream-json`,
+the way a person works through many independent subtasks in one sitting. It measures what
+orchestration is for: how large the main session's context gets, when it compacts, what that costs,
+and whether later subtasks still get done.
+
+```bash
+node bench/session.js --arms-file arms.json --model claude-sonnet-5-5 --effort medium \
+  --tasks session-multifix-16 --runs 6 -j 6 --autocompact 100000 --out bench/results/r15-long-session
+```
+
+Arms take the run.js arms-file shape plus `sessionMode: "clear"` (a fresh process per message in the
+same work dir, as `/clear` between subtasks). Delegation is an instruction in an arm's
+`--append-system-prompt`, the way a user would put it in CLAUDE.md, and custom workers come from
+`--agents`. Per session it records the main context after every message (input + cache reads +
+cache writes of the last main-thread request), compactions with their `pre_tokens`, exact cost per
+message with its subagent share, subagents spawned by type, the modules whose hidden tests all pass,
+and every raw event (`raw/*.jsonl.gz`, with the test output). Subagents run in the foreground,
+children get the allowlisted environment, and a rate limit, crash or stall marks the session
+incomplete; `--resume` continues a halted run, `--messages N` runs only the first N subtasks for a
+smoke test.
+
+`session-multifix-16` and `project-multifix-vendored` are built by `bench/build_multifix.py`: sixteen
+(or eight) pure-Python standard-library modules copied from the running Python under new names, one
+bug planted in each, normalised through `ast.unparse` so a diff against the installed library does
+not find the bug, and a prompt that says there is no reference copy (an r14 trace showed Sonnet 5.5
+diffing every module against `/usr/lib/python3.x`). Each session subtask also asks for a read-through
+of the module, so the session carries real reading.
 
 ## What is recorded per run
 

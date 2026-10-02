@@ -1,0 +1,6 @@
+{"arm":"solo","cache_creation":5506,"cache_read":20291,"cost_usd":0.0268702,"errors":[],"autocompact_state":null}
+{"arm":"solo-clear","cache_creation":5503,"cache_read":20285,"cost_usd":0.026857,"errors":[],"autocompact_state":null}
+{"arm":"fork","cache_creation":5624,"cache_read":20784,"cost_usd":0.0274408,"errors":[],"autocompact_state":null}
+{"arm":"sub","cache_creation":5618,"cache_read":20421,"cost_usd":0.0273442,"errors":[],"autocompact_state":null}
+{"arm":"lean-sub","cache_creation":5659,"cache_read":20462,"cost_usd":0.0275164,"errors":[],"autocompact_state":null}
+{"arm":"lean-haiku","cache_creation":5661,"cache_read":20464,"cost_usd":0.027524800000000002,"errors":[],"autocompact_state":null}

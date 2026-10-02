@@ -1,0 +1,104 @@
+{
+  "opts": {
+    "armsFile": "/tmp/claude-0/-home-user-xend/a84de686-d705-58b9-a7e6-8388d2dfde77/scratchpad/orch/arms-r16.json",
+    "model": "claude-sonnet-5-5",
+    "effort": "medium",
+    "tasks": "session-multifix-16",
+    "runs": 6,
+    "concurrency": 6,
+    "out": "/tmp/claude-0/-home-user-xend/a84de686-d705-58b9-a7e6-8388d2dfde77/scratchpad/orch/r16",
+    "autocompact": "100000",
+    "toolset": "local",
+    "warmup": true,
+    "keep": false,
+    "dryRun": false,
+    "help": false,
+    "messages": 0,
+    "resume": false
+  },
+  "arms": [
+    {
+      "label": "baseline",
+      "kind": "baseline",
+      "model": "claude-sonnet-5-5",
+      "mode": "plain",
+      "args": [
+        "--setting-sources",
+        "project,local"
+      ],
+      "sessionMode": "continuous"
+    },
+    {
+      "label": "xend",
+      "kind": "xend",
+      "model": "claude-sonnet-5-5",
+      "mode": "plain",
+      "args": [
+        "--setting-sources",
+        "project,local"
+      ],
+      "sessionMode": "continuous"
+    },
+    {
+      "label": "xend-delegate",
+      "kind": "xend",
+      "model": "claude-sonnet-5-5",
+      "mode": "plain",
+      "env": {
+        "XEND_DELEGATE": "1"
+      },
+      "args": [
+        "--setting-sources",
+        "project,local"
+      ],
+      "sessionMode": "continuous"
+    }
+  ],
+  "tasks": [
+    "session-multifix-16"
+  ],
+  "claude": "2.1.287 (Claude Code)",
+  "env_allow": [
+    "PATH",
+    "HOME",
+    "SHELL",
+    "TERM",
+    "LANG",
+    "LC_ALL",
+    "USER",
+    "TMPDIR",
+    "TZ",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "NO_PROXY",
+    "no_proxy",
+    "GLOBAL_AGENT_HTTPS_PROXY",
+    "GLOBAL_AGENT_NO_PROXY",
+    "SSL_CERT_FILE",
+    "NODE_EXTRA_CA_CERTS",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "PIP_CERT",
+    "GIT_SSL_CAINFO",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_CUSTOM_HEADERS",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "AWS_REGION",
+    "AWS_PROFILE",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "ANTHROPIC_VERTEX_PROJECT_ID",
+    "CLOUD_ML_REGION",
+    "GOOGLE_APPLICATION_CREDENTIALS"
+  ],
+  "started": "2026-10-02T09:16:03.370Z",
+  "skipped_done": 0
+}

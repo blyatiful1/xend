@@ -9,6 +9,7 @@
 //   node xend-cli.js note <session-id> <text...>  append a note to the session checkpoint
 //   node xend-cli.js ponytail <session-id> [arg]  switch the lean level, or 'rules' / 'status'
 //   node xend-cli.js outline <file> [--max N]     print a heuristic outline of a file
+//   node xend-cli.js delegate <session> [on|off|status]   long-session mode (/xend:delegate)
 //   node xend-cli.js plan <sub> [args] [--session <id>] [--file <path>]
 //   any command also takes --data <dir>: the plugin data dir (skills pass ${CLAUDE_PLUGIN_DATA})
 //       set               validate + write a plan (JSON via --file or stdin)
@@ -279,6 +280,23 @@ function main() {
       }
       state.setSessionOverride(dir, key, v);
       console.log('xend session override: ' + key + ' = ' + JSON.stringify(v));
+      return;
+    }
+    case 'delegate': {
+      // /xend:delegate [on|off|status]: a session override (session-start applies it after /clear or
+      // compaction too); the rule is printed here because the session block is only built at start
+      const [sid, rawArg] = rest;
+      const arg = String(rawArg || 'status').trim().toLowerCase() || 'status';
+      const dir = cliSessionDir(sid);
+      const cfg = config.resolve({ cwd });
+      const archOn = !!(cfg.architect && cfg.architect.enabled) || state.sessionOverrides(dir).architect === true;
+      if (arg === 'on' || arg === 'off') state.setSessionOverride(dir, 'delegate', arg === 'on');
+      else if (arg !== 'status') { console.log('/xend:delegate takes on, off or status'); process.exitCode = 1; return; }
+      const ov = state.sessionOverrides(dir).delegate;
+      const on = typeof ov === 'boolean' ? ov : cfg.delegate === true;
+      if (on && archOn) { console.log('delegate mode: on, but architect mode is on too and takes precedence; run /xend:plan off to use delegate mode'); return; }
+      console.log('delegate mode: ' + (on ? 'on' : 'off') + (typeof ov === 'boolean' ? ' (this session)' : ''));
+      if (on) console.log(context.DELEGATE);
       return;
     }
     case 'ponytail': {

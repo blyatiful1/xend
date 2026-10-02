@@ -97,6 +97,14 @@ test('normalizeArm: arms-file entries keep per-arm env and plugin dir, unknown k
     { label: 'x', kind: 'baseline', model: 'haiku', mode: 'plain', env: { A: '1' } });
 });
 
+test('normalizeArm: promptSuffix and extraTools are kept as strings, absent or empty ones are dropped', () => {
+  const a = normalizeArm({ label: 'wf', kind: 'baseline', promptSuffix: 'Use a workflow.', extraTools: 'Workflow' }, { model: 'sonnet' });
+  assert.strictEqual(a.promptSuffix, 'Use a workflow.');
+  assert.strictEqual(a.extraTools, 'Workflow');
+  const b = normalizeArm({ label: 'solo', kind: 'baseline', promptSuffix: '', extraTools: '' }, { model: 'sonnet' });
+  assert.deepStrictEqual(b, { label: 'solo', kind: 'baseline', model: 'sonnet', mode: 'plain' });
+});
+
 test('toolArgs: local toolset makes the available set explicit and pre-approves it plus the task tools', () => {
   const r = toolArgs('Bash,Read,Edit,Write,MultiEdit,Grep,Glob', 'local');
   assert.strictEqual(r.tools, TOOLSETS.local);
@@ -134,6 +142,14 @@ test('cleanEnv: an ambient cache-lifetime setting never reaches an arm unless th
     for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
     Object.assign(process.env, saved);
   }
+});
+
+test('cleanEnv: only allowlisted host variables reach a child; host thinking, background and session settings never do', () => {
+  const { cleanEnv } = require('../bench/run.js');
+  const host = { PATH: '/bin', HOME: '/root', HTTPS_PROXY: 'http://p', ANTHROPIC_API_KEY: 'k', MAX_THINKING_TOKENS: '31999', CLAUDE_AUTO_BACKGROUND_TASKS: 'true',
+    CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '80', CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'remote', XEND_PROFILE: 'aggressive' };
+  const e = cleanEnv({ XEND_PROFILE: 'balanced' }, host);
+  assert.deepStrictEqual(e, { PATH: '/bin', HOME: '/root', HTTPS_PROXY: 'http://p', ANTHROPIC_API_KEY: 'k', XEND_PROFILE: 'balanced' });
 });
 
 test('normalizeArm keeps per-arm claude args; parseArgs flags --help and refuses unknown arguments', () => {
