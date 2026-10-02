@@ -36,7 +36,17 @@ function pct(x) { return isNaN(x) ? 'n/a' : (x >= 0 ? '+' : '') + (x * 100).toFi
 function usd(x) { return isNaN(x) ? 'n/a' : '$' + x.toFixed(3); }
 function k(x) { return isNaN(x) ? 'n/a' : (x / 1000).toFixed(1) + 'k'; }
 
-function report(rows, base) {
+// A resumed run can hold several records for one task|arm|trial (an incomplete attempt, then the rerun):
+// the last record per key is the one that counts, in the tables and in the counts.
+function latest(rows) {
+  const m = new Map();
+  for (const r of rows) m.set(r.task + '|' + r.arm + '|' + r.trial, r);
+  return [...m.values()];
+}
+
+function report(allRows, base) {
+  const rows = latest(allRows);
+  const superseded = allRows.length - rows.length;
   const valid = rows.filter((r) => r.complete);
   const arms = [...new Set(rows.map((r) => r.arm))];
   const by = {};
@@ -46,7 +56,8 @@ function report(rows, base) {
   out.push('');
   const tasks = [...new Set(rows.map((r) => r.task))];
   out.push('Task(s): ' + tasks.join(', ') + '. Sessions: ' + rows.length + ' (' + valid.length + ' complete). Base arm: `' + base + '`. ' +
-    'Paired by trial; CIs are bootstrap 95% intervals of the ratio of means over trials.');
+    'Paired by trial; CIs are bootstrap 95% intervals of the ratio of means over trials.' +
+    (superseded ? ' ' + superseded + ' earlier attempt(s) superseded by a resumed rerun are not counted.' : ''));
   const incomplete = rows.filter((r) => !r.complete);
   if (incomplete.length) out.push('', 'Incomplete or invalid sessions (excluded): ' + incomplete.map((r) => r.arm + '#' + r.trial + ' (' + (r.invalid || 'errors') + ')').join(', ') + '.');
   out.push('');
@@ -115,4 +126,4 @@ if (require.main === module) {
   if (mi >= 0) fs.writeFileSync(args[mi + 1], md);
   process.stdout.write(md);
 }
-module.exports = { report, bootRatio };
+module.exports = { report, bootRatio, latest };

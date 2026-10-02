@@ -34,8 +34,9 @@ node bench/analyze.js bench/results/<run> --md report.md
 ### Environment
 
 Each child is a plain local `claude -p`. Since r15 a child's environment is built from an allowlist
-(`ENV_ALLOW` in `run.js`: `PATH`, `HOME`, proxy and CA variables) plus what its arm sets, never
-inherited: a cloud session exports `CLAUDE_CODE_ENTRYPOINT` (that host's tool set, system prompt and a
+(`ENV_ALLOW` in `run.js`: `PATH`, `HOME`, proxy and CA variables, and the credential and provider
+variables a runner may authenticate with, such as `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` and the
+Bedrock and Vertex settings) plus what its arm sets, never inherited: a cloud session exports `CLAUDE_CODE_ENTRYPOINT` (that host's tool set, system prompt and a
 side request per run), `MAX_THINKING_TOKENS=31999` (fixed instead of adaptive thinking), and
 background-task and compaction overrides, all of which reached every arm of earlier runs through the
 old denylist. Run in a cloud container where xend is enabled in `~/.claude/settings.json`, pass

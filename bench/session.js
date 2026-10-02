@@ -15,7 +15,8 @@
 // arms of trial 1, then trial 2, ...) so drift over the run spreads evenly over the arms.
 //
 // Measurement rules (each one fixes a defect found by an adversarial review before r15):
-// - A child gets an allowlisted environment (PATH, HOME, proxy and CA variables), never the hosting
+// - A child gets an allowlisted environment (run.ENV_ALLOW: PATH, HOME, proxy, CA, credential and
+//   provider variables), never the hosting
 //   session's: a hosted session exports MAX_THINKING_TOKENS, background-task and compaction overrides
 //   that would change what every arm does.
 // - Subagents run in the foreground (CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 unless an arm sets it):
