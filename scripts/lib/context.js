@@ -25,8 +25,16 @@ const TERSE_EXEMPTIONS = 'Normal prose for anything written to files, commits, P
 const READING = 'Work in few turns; each turn re-reads the whole context. Put independent tool calls in one message. Open files the task names directly (by range if large); search only for what you cannot name. Never re-read a file to confirm an edit, or re-read an unchanged file. Quiet test flags (pytest -q).';
 
 // No condensed-output paragraph: the explanation travels in every [xend] marker itself
-// (scripts/post-tool-use.js), so a session in which nothing is condensed pays nothing for it. No
-// delegation paragraph either: the only shipped agents are architect-mode builders.
+// (scripts/post-tool-use.js), so a session in which nothing is condensed pays nothing for it.
+
+// Long-session mode (opt-in: /xend:delegate on, XEND_DELEGATE=1, .xend.json {"delegate": true}). In a
+// long session every subtask done in place stays in the context that every later turn re-reads at
+// the 1-hour cache price; handed to a lean subagent it is done in a disposable context written at
+// the 5-minute price and only a short report comes back. Bench r15 (16 subtasks per session, the
+// same instruction in the system prompt): -16.7% cost, -54% tokens, main context 33k against a 66k
+// peak with 1.33 compactions, every subtask fixed; a general-purpose subagent instead cost +17%
+// (docs/RESEARCH.md H27). Models do not delegate unprompted (H22), so the rule says when.
+const DELEGATE = 'Delegate mode (long session): for each self-contained subtask the user gives you (a fix, change or investigation that needs reading code), make one Agent call with subagent_type xend-subtask and the request, plus any context from this conversation it needs, as the prompt; do not read or edit that code yourself. Reply with its result in one line. Answer quick questions and follow-ups that need this conversation yourself.';
 
 // scripts/xend-cli.js, used verbatim inside ARCHITECT below; session-start.js and the `context`
 // CLI command both pass their own resolved absolute path via opts.cliPath, but a default keeps
@@ -99,14 +107,17 @@ function build(cfg, opts) {
   const parts = [];
   const lean = ponytailParts(cfg, opts.ponytail);
   const archOn = !!(cfg.architect && cfg.architect.enabled);
-  parts.push('xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + lean.suffix + (archOn ? ', architect' : '') + ').');
+  // architect mode already delegates (to its own builders); the two rules would contradict each other
+  const delegateOn = cfg.delegate === true && !archOn;
+  parts.push('xend active (profile ' + cfg.profile + ', terse ' + cfg.terse + lean.suffix + (archOn ? ', architect' : '') + (delegateOn ? ', delegate' : '') + ').');
   if (opts.reset) parts.push('Context was reset (' + opts.reset + '); the rules below apply again.');
   if (cfg.terse && cfg.terse !== 'off' && TERSE[cfg.terse]) parts.push(TERSE[cfg.terse] + ' ' + TERSE_EXEMPTIONS);
   if (cfg.readingDiscipline !== false) parts.push(READING);
   for (const l of lean.parts) parts.push(l);
   if (archOn) parts.push(architectText(opts.cliPath, cfg.architect.gate !== false));
+  if (delegateOn) parts.push(DELEGATE);
   if (opts.checkpoint) parts.push('Checkpoint from before the reset:\n' + opts.checkpoint.trim());
   return parts.join('\n\n');
 }
 
-module.exports = { build, ponytailParts, TERSE, TERSE_EXEMPTIONS, READING, LEAN, LEAN_LEVEL, LEAN_UPSTREAM, LEAN_BRIDGE, architectText, DEFAULT_CLI_PATH };
+module.exports = { build, ponytailParts, TERSE, TERSE_EXEMPTIONS, READING, DELEGATE, LEAN, LEAN_LEVEL, LEAN_UPSTREAM, LEAN_BRIDGE, architectText, DEFAULT_CLI_PATH };

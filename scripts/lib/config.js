@@ -36,6 +36,9 @@ const PROFILES = {
     },
     contextEditing: { enabled: false, triggerTokens: 110000, keepToolUses: 12, clearAtLeastTokens: 40000 },
     delegation: true,
+    // long-session mode, opt-in: each self-contained subtask goes to the lean xend-subtask agent so the
+    // main context stays small (bench r15: -16.7% cost, -54% tokens, no compaction; docs/RESEARCH.md H27)
+    delegate: false,
     checkpoint: true,
     readingDiscipline: true,
     // run the project's quick tests after an Edit and attach the result (saves the test turn); off in lite.
@@ -75,6 +78,9 @@ const PROFILES = {
     },
     contextEditing: { enabled: false, triggerTokens: 110000, keepToolUses: 12, clearAtLeastTokens: 40000 },
     delegation: true,
+    // long-session mode, opt-in: each self-contained subtask goes to the lean xend-subtask agent so the
+    // main context stays small (bench r15: -16.7% cost, -54% tokens, no compaction; docs/RESEARCH.md H27)
+    delegate: false,
     checkpoint: true,
     readingDiscipline: true,
     autoTest: { enabled: true, command: '', maxMs: 8000, timeoutMs: 20000, maxChars: 1200 },
@@ -109,6 +115,9 @@ const PROFILES = {
     },
     contextEditing: { enabled: true, triggerTokens: 110000, keepToolUses: 12, clearAtLeastTokens: 40000 },
     delegation: true,
+    // long-session mode, opt-in: each self-contained subtask goes to the lean xend-subtask agent so the
+    // main context stays small (bench r15: -16.7% cost, -54% tokens, no compaction; docs/RESEARCH.md H27)
+    delegate: false,
     checkpoint: true,
     readingDiscipline: true,
     autoTest: { enabled: true, command: '', maxMs: 8000, timeoutMs: 20000, maxChars: 1200 },
@@ -174,6 +183,7 @@ function envOverrides(env) {
   }
   if (env.XEND_DEDUPE !== undefined) o.shape = Object.assign(o.shape || {}, { dedupe: !/^(0|false|off)$/i.test(env.XEND_DEDUPE) });
   if (env.XEND_DELEGATION !== undefined) o.delegation = !/^(0|false|off)$/i.test(env.XEND_DELEGATION);
+  if (env.XEND_DELEGATE !== undefined) o.delegate = !/^(0|false|off)$/i.test(env.XEND_DELEGATE);
   if (env.XEND_READING !== undefined) o.readingDiscipline = !/^(0|false|off)$/i.test(env.XEND_READING);
   for (const [name, key] of [['XEND_SHAPE_TESTRUNNERS', 'testRunners'], ['XEND_SHAPE_PKG', 'packageManagers'], ['XEND_SHAPE_HEADTAIL', 'headTail'], ['XEND_SHAPE_ANSI', 'stripAnsi'], ['XEND_SHAPE_MCP', 'mcp']]) {
     if (env[name] !== undefined) o.shape = Object.assign(o.shape || {}, { [key]: !/^(0|false|off)$/i.test(env[name]) });
