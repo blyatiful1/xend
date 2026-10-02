@@ -97,29 +97,34 @@ On tasks below the size floor (three files or fewer, fewer than 8 tool calls) th
 ## Orchestration on Claude Sonnet 5.5 (r13-r15)
 
 Does handing work to subagents save money? Measured three ways, all on Claude Sonnet 5.5 at medium
-effort, every arm in a run on the same tasks, the hosting session's environment kept out of every
-child (`bench/README.md`, Environment).
+effort, every arm in a run on the same tasks. For r15 the hosting session's environment was kept out of
+every child (`bench/README.md`, Environment); r13 and r14 used the older denylist and so inherited the
+cloud host's fixed thinking budget in every arm, which keeps their arm-to-arm comparisons valid.
 
 **One prompt per task (r13, r14; `bench/run.js`).** Sonnet 5.5 finishes each project task in about
 four turns for $0.06-0.21: it writes all the modules of a package in one turn of parallel tool
 calls. There is nothing left for orchestration to save:
 
-| Arm, against one session doing everything | Tasks | Cost per task | Hidden tests |
+Each figure is `bench/analyze.js`'s paired cost change per task with its 95% CI, over the three
+project tasks (r14's fourth, eight-bug task is excluded, see below):
+
+| Arm, against one session doing everything | Cost per task, r13 | Cost per task, r14 | Hidden tests |
 |---|---|---|---|
-| fork subagents (`CLAUDE_CODE_FORK_SUBAGENT=1`) | 3 + 4 | +87.7% (r13, CI +67.7% to +123.2%); +79% (r14) | 100% |
-| general-purpose subagents | 3 + 4 | +138.5% (r13); +184% (r14) | 100% |
-| the Workflow tool | 3 + 4 | +185.5% (r13); +191% (r14) | 100% |
-| superpowers 6.4.2, as installed | 4 | +15% (it spawned no subagent; the cost is its prefix) | 100% |
-| superpowers with subagent-driven development asked for | 4 | +137% | 100% |
-| oh-my-claudecode 5.6.0, "autopilot" | 4 | +19% (spawned nothing) | 100% |
-| `--advisor opus` | 4 | +21% (never consulted the advisor; the cost is its tool definition) | 100% |
-| xend architect mode | 3 | +0.4% (never delegated: the work was done before the plan gate fired) | 100% |
+| fork subagents (`CLAUDE_CODE_FORK_SUBAGENT=1`) | +87.7% (+67.7% to +123.2%) | +55.2% (+43.9% to +65.9%) | 100% |
+| general-purpose subagents | +138.5% (+1.1% to +234.8%) | +115.3% (+112.7% to +119.7%) | 100% |
+| the Workflow tool | +185.5% (+164.4% to +198.2%) | +155.8% (+108.5% to +186.8%) | 100% |
+| superpowers 6.4.2, as installed | | +13.3% (+10.5% to +15.5%); it spawned no subagent, the cost is its prefix | 100% |
+| superpowers with subagent-driven development asked for | | +125.7% (+85.2% to +147.3%) | 100% |
+| oh-my-claudecode 5.6.0, "autopilot" | | +12.8% (+9.5% to +16.8%); spawned nothing | 100% |
+| `--advisor opus` | | +8.8% (+3.2% to +17.7%); never consulted the advisor, the cost is its tool definition | 100% |
+| xend architect mode | +0.4% (-1.1% to +1.8%); never delegated, the work was done before the plan gate fired | | 100% |
 
 Fresh subagents and Workflow agents each write their own prefix and re-read the files the parent
 already read (cache writes 3-5x solo, output about 2x); forks share the parent's cache, so their writes
 match solo, but every fork turn re-reads the parent's whole context (cache reads 4-8x solo). r14's
 eight-bug task is excluded: its trace showed Sonnet 5.5 diffing every module against the installed
 standard library, so it measured that shortcut, not reading (the task was rebuilt for r15).
+`bench/results/r14-orch-plugins/report.md` covers all four tasks, so its figures differ.
 
 **A long session (r15; `bench/session.js`).** Sixteen independent subtasks sent one after another into
 one session, as in a long working day: each fixes one bug in a 200-6,400-line module and reads the

@@ -261,11 +261,12 @@ into the baseline arm too. Children now get an allowlisted environment and every
 subagent pays a prefix (a fresh one is written at 1.25x; a fork reads the parent's at 0.1x but re-reads
 the parent's whole conversation every turn) and the parent pays turns to brief and integrate, while
 Sonnet 5.5 writes a six-module package in one turn of parallel tool calls and finishes a project task
-in about four turns. → *(measured here, r13 and r14, Claude Code 2.1.287, 3-4 project tasks, one trial
-per arm, every arm 100% of hidden tests)*: fork subagents +79% to +88%, general-purpose subagents +139% to
-+184%, the Workflow tool +186% to +191%, superpowers with subagent-driven development +137%; installed but
-not asked to orchestrate, superpowers (+15%) and oh-my-claudecode autopilot (+19%) spawned nothing and
-cost their prefix, and `--advisor opus` (+21%) never consulted the advisor. No third-party repo found in
+in about four turns. → *(measured here, r13 and r14, Claude Code 2.1.287, the three project tasks, one
+trial per arm, every arm 100% of hidden tests, paired cost change per task)*: fork subagents +55% to +88%,
+general-purpose subagents +115% to +139%, the Workflow tool +156% to +186%, superpowers with
+subagent-driven development +126%; installed but not asked to orchestrate, superpowers (+13%) and
+oh-my-claudecode autopilot (+13%) spawned nothing and cost their prefix, and `--advisor opus` (+9%)
+never consulted the advisor. No third-party repo found in
 a survey of 20 (claude-flow/Ruflo, oh-my-claudecode, SuperClaude, superpowers, GSD, BMAD, spec-kit, Task
 Master, Serena, context-mode, ...) has a paired measurement against one agent; Ruflo's "30-50% fewer
 tokens" is a hard-coded counter (its issue #1514). Honey (Green-PT/honey-for-devs 1.3.1, reviewed at
@@ -325,7 +326,7 @@ frontmatter (H23) and models do not delegate unprompted (H22).
 | A verifier living in `PostToolUse(Agent)` | The `Agent` tool is asynchronous in this build *(verified here, Claude Code 2.1.272)*: `PostToolUse(Agent)` fires at launch with `tool_response.status: "async_launched"` and no result to check. `SubagentStop` is the only hook that ever sees the subagent's final reply, so the verifier lives there instead. |
 | Haiku workers for delegated coding subtasks | r15: +34.5% against solo and 4x slower, more turns per subtask (4.3M cache reads against 0.23M for a Sonnet worker), two subtasks missed in one of six sessions (H27). Cheaper per token, dearer per subtask. |
 | General-purpose subagents as the delegation target | r15: +17.0% against solo and +40% against a lean custom subagent doing the same work; the ~11k-token prefix and broader exploration are the difference (H27). |
-| The Workflow tool or agent teams to save tokens | r13/r14: +186% to +191% on project tasks; Anthropic's own docs say workflows "can use meaningfully more tokens" and teams ~7x. Useful for scale or wall time, not for cost (H26). |
+| The Workflow tool or agent teams to save tokens | r13/r14: +156% to +186% on project tasks; Anthropic's own docs say workflows "can use meaningfully more tokens" and teams ~7x. Useful for scale or wall time, not for cost (H26). |
 | A soft `PreToolUse` gate that names its own escape hatch (`plan off`) | *(verified here)*: the model used exactly the exit it was told about and finished the task directly (11 turns, one denial, $0.18) instead of planning. See H22. The shipped gate never advertises a way to disable itself. |
 
 ## 5. What xend adds that did not exist as a package
