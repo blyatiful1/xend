@@ -447,4 +447,4 @@ async function main() {
 function claudeVersion() { try { return execFileSync('claude', ['--version'], { timeout: 10000 }).toString().trim(); } catch (_) { return 'unknown'; } }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, normalizeArm, toolArgs, parseScore, splitCost, parseArmEnv, jobEnv, cleanEnv, TOOLSETS };
+module.exports = { ROOT, prepareFixture, runTest, claudeVersion, loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, normalizeArm, toolArgs, parseScore, splitCost, parseArmEnv, jobEnv, cleanEnv, TOOLSETS };

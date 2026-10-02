@@ -1,0 +1,86 @@
+[
+ {
+  "label": "solo",
+  "kind": "baseline",
+  "args": [
+   "--setting-sources",
+   "project,local"
+  ]
+ },
+ {
+  "label": "fork",
+  "kind": "baseline",
+  "env": {
+   "CLAUDE_CODE_FORK_SUBAGENT": "1"
+  },
+  "args": [
+   "--setting-sources",
+   "project,local"
+  ],
+  "promptSuffix": "Orchestrate this: split the work into independent parts and hand each part to a fork subagent (Agent tool, subagent_type \"fork\"; forks inherit your context, so the prompt only says what to do and how to check it). Run independent forks in parallel, then integrate and run the full test suite yourself."
+ },
+ {
+  "label": "fresh-sub",
+  "kind": "baseline",
+  "args": [
+   "--setting-sources",
+   "project,local"
+  ],
+  "promptSuffix": "Orchestrate this: split the work into independent parts and hand each part to a general-purpose subagent (Agent tool) with a self-contained brief: what to do and how to check it. Run independent subagents in parallel, then integrate and run the full test suite yourself."
+ },
+ {
+  "label": "workflow",
+  "kind": "baseline",
+  "extraTools": "Workflow",
+  "args": [
+   "--setting-sources",
+   "project,local"
+  ],
+  "promptSuffix": "Use a workflow to orchestrate this: split the work into independent parts and run a Workflow script whose agents each handle one part and check it; then run the full test suite yourself."
+ },
+ {
+  "label": "superpowers",
+  "kind": "baseline",
+  "args": [
+   "--setting-sources",
+   "project,local",
+   "--plugin-dir",
+   "/tmp/claude-0/-home-user-xend/a84de686-d705-58b9-a7e6-8388d2dfde77/scratchpad/orch/superpowers"
+  ],
+  "note": "obra/superpowers 6.4.2 @8ca22db, natural use"
+ },
+ {
+  "label": "superpowers-sdd",
+  "kind": "baseline",
+  "args": [
+   "--setting-sources",
+   "project,local",
+   "--plugin-dir",
+   "/tmp/claude-0/-home-user-xend/a84de686-d705-58b9-a7e6-8388d2dfde77/scratchpad/orch/superpowers"
+  ],
+  "promptSuffix": "Use superpowers:subagent-driven-development for the implementation.",
+  "note": "obra/superpowers 6.4.2 @8ca22db"
+ },
+ {
+  "label": "omc-autopilot",
+  "kind": "baseline",
+  "args": [
+   "--setting-sources",
+   "project,local",
+   "--plugin-dir",
+   "/tmp/claude-0/-home-user-xend/a84de686-d705-58b9-a7e6-8388d2dfde77/scratchpad/orch/oh-my-claudecode"
+  ],
+  "promptSuffix": "Run this in autopilot.",
+  "note": "oh-my-claudecode 5.6.0 @dc7ba1d"
+ },
+ {
+  "label": "advisor-opus",
+  "kind": "baseline",
+  "args": [
+   "--setting-sources",
+   "project,local",
+   "--advisor",
+   "opus"
+  ]
+ }
+]
