@@ -170,18 +170,20 @@ function prepareFixture(task, workRoot) {
   return work;
 }
 
-function cleanEnv(extra) {
-  const env = Object.assign({}, process.env, extra);
-  // The baseline arm is structurally immune (it gets no --plugin-dir), so an ambient export
-  // — or an upstream ponytail install on the operator's machine — would contaminate one side
-  // only and look like a real effect.
-  // CLAUDE_CODE_ENTRYPOINT: a child inheriting the hosting session's entrypoint (e.g. a cloud
-  // session's) gets that host's system prompt and side requests instead of a plain `claude -p`'s.
-  for (const k of ['CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'XEND_PROFILE', 'XEND_TERSE', 'XEND_SHAPE',
-    'XEND_PONYTAIL', 'XEND_PONYTAIL_TEXT', 'XEND_UPSTREAM_PONYTAIL', 'XEND_PONYTAIL_STRICT', 'PONYTAIL_DEFAULT_MODE', 'XEND_ARCHITECT',
-    'XEND_TRUST_TESTS', 'XEND_AUTOTEST', 'XEND_AUTOTEST_CMD',
-    // an ambient cache-lifetime choice would change what every arm pays; an arm sets it explicitly
-    ...CACHE_TTL_VARS]) delete env[k];
+// A child never inherits the operator's environment: a hosted session (Claude Code on the web, a CI
+// runner) exports variables that change what every arm does: MAX_THINKING_TOKENS=31999 (fixed
+// thinking instead of adaptive), background-task and compaction overrides, its own entrypoint and
+// session ids. Only the variables needed to reach the API (proxy and CA settings) and to run tools
+// pass through; everything an arm needs is set explicitly in `extra`. Runs before r15 inherited the
+// host environment minus a short denylist, so their arms all ran with that host's settings.
+const ENV_ALLOW = ['PATH', 'HOME', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'USER', 'TMPDIR', 'TZ',
+  'HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy', 'NO_PROXY', 'no_proxy', 'GLOBAL_AGENT_HTTPS_PROXY', 'GLOBAL_AGENT_NO_PROXY',
+  'SSL_CERT_FILE', 'NODE_EXTRA_CA_CERTS', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'PIP_CERT', 'GIT_SSL_CAINFO'];
+
+function cleanEnv(extra, source) {
+  source = source || process.env;
+  const env = {};
+  for (const k of ENV_ALLOW) if (source[k] != null) env[k] = source[k];
   return Object.assign(env, extra);
 }
 
@@ -447,4 +449,4 @@ async function main() {
 function claudeVersion() { try { return execFileSync('claude', ['--version'], { timeout: 10000 }).toString().trim(); } catch (_) { return 'unknown'; } }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { ROOT, prepareFixture, runTest, claudeVersion, loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, normalizeArm, toolArgs, parseScore, splitCost, parseArmEnv, jobEnv, cleanEnv, TOOLSETS };
+module.exports = { ROOT, ENV_ALLOW, prepareFixture, runTest, claudeVersion, loadTasks, sumModelUsage, normalizeModelUsage, shapingSummary, parseArgs, parseArm, normalizeArm, toolArgs, parseScore, splitCost, parseArmEnv, jobEnv, cleanEnv, TOOLSETS };

@@ -47,9 +47,7 @@ const PRICES = { // USD per token, list prices; used only for the main/subagent 
   'claude-sonnet-5-5': { in: 2e-6, w1h: 4e-6, w5m: 2.5e-6, r: 0.2e-6, out: 10e-6 },
   'claude-haiku-4-5': { in: 1e-6, w1h: 2e-6, w5m: 1.25e-6, r: 0.1e-6, out: 5e-6 },
 };
-const ENV_ALLOW = ['PATH', 'HOME', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'USER', 'TMPDIR', 'TZ',
-  'HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy', 'NO_PROXY', 'no_proxy', 'GLOBAL_AGENT_HTTPS_PROXY', 'GLOBAL_AGENT_NO_PROXY',
-  'SSL_CERT_FILE', 'NODE_EXTRA_CA_CERTS', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'PIP_CERT', 'GIT_SSL_CAINFO'];
+const ENV_ALLOW = run.ENV_ALLOW;
 const STALL_MS = 15 * 60 * 1000;
 const STDLIB_RE = /\/usr\/lib\/python|sysconfig|site-packages|inspect\.getsource|\bimport\s+(textwrap|difflib|statistics|fractions|shlex|calendar|ipaddress|configparser|argparse|pprint|plistlib|fnmatch|_?pydecimal|decimal|heapq|graphlib)\b|from\s+(urllib|textwrap|difflib|statistics|fractions|shlex|calendar|ipaddress|configparser|argparse|pprint|plistlib|fnmatch|_pydecimal|decimal|heapq|graphlib)\b|urllib\.parse/;
 
