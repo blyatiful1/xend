@@ -94,6 +94,61 @@ Every arm passed every hidden test, so the comparison is cost and turns alone. P
 
 On tasks below the size floor (three files or fewer, fewer than 8 tool calls) the layer is off by construction: the model works directly, exactly as without it.
 
+## Orchestration on Claude Sonnet 5.5 (r13-r15)
+
+Does handing work to subagents save money? Measured three ways, all on Claude Sonnet 5.5 at medium
+effort, every arm in a run on the same tasks, the hosting session's environment kept out of every
+child (`bench/README.md`, Environment).
+
+**One prompt per task (r13, r14; `bench/run.js`).** Sonnet 5.5 finishes each project task in about
+four turns for $0.06-0.21: it writes all the modules of a package in one turn of parallel tool
+calls. There is nothing left for orchestration to save:
+
+| Arm, against one session doing everything | Tasks | Cost per task | Hidden tests |
+|---|---|---|---|
+| fork subagents (`CLAUDE_CODE_FORK_SUBAGENT=1`) | 3 + 4 | +87.7% (r13, CI +67.7% to +123.2%); +79% (r14) | 100% |
+| general-purpose subagents | 3 + 4 | +138.5% (r13); +184% (r14) | 100% |
+| the Workflow tool | 3 + 4 | +185.5% (r13); +191% (r14) | 100% |
+| superpowers 6.4.2, as installed | 4 | +15% (it spawned no subagent; the cost is its prefix) | 100% |
+| superpowers with subagent-driven development asked for | 4 | +137% | 100% |
+| oh-my-claudecode 5.6.0, "autopilot" | 4 | +19% (spawned nothing) | 100% |
+| `--advisor opus` | 4 | +21% (never consulted the advisor; the cost is its tool definition) | 100% |
+| xend architect mode | 3 | +0.4% (never delegated: the work was done before the plan gate fired) | 100% |
+
+Fresh subagents and Workflow agents each write their own prefix and re-read the files the parent
+already read (cache writes 3-5x solo, output about 2x); forks share the parent's cache, so their writes
+match solo, but every fork turn re-reads the parent's whole context (cache reads 4-8x solo). r14's
+eight-bug task is excluded: its trace showed Sonnet 5.5 diffing every module against the installed
+standard library, so it measured that shortcut, not reading (the task was rebuilt for r15).
+
+**A long session (r15; `bench/session.js`).** Sixteen independent subtasks sent one after another into
+one session, as in a long working day: each fixes one bug in a 200-6,400-line module and reads the
+rest of the module for the same mistake (`session-multifix-16`, 17,700 lines, 131 hidden tests).
+Autocompact window 100k, so compaction fires at about 67k, as a full window would after
+proportionally more subtasks. Delegation is a standing instruction in the system prompt, as a user
+would put it in CLAUDE.md. 6 arms x 6 trials, every session complete:
+
+| Arm | Cost per session | vs solo (95% CI) | Main context, peak / end | Compactions | Subtasks fixed | Wall |
+|---|---|---|---|---|---|---|
+| solo: the session does every subtask | $1.28 | | 66.3k / 43.6k | 1.33 | 16/16 | 4 min |
+| `/clear` between subtasks (a fresh process each) | $1.33 | +3.8% (-13.8% to +24.8%) | 42.0k / 16.9k | 0 | 16/16 | 4 min |
+| **lean custom subagent** (tools Bash, Read, Edit, Grep, Glob; a five-line prompt; same model) | **$1.07** | **-16.7% (-25.9% to -5.2%)** | 33.1k / 33.1k | 0 | 16/16 | 4 min |
+| fork subagent | $1.22 | -4.9% (-15.2% to +8.0%) | 33.3k / 33.3k | 0 | 16/16 | 5 min |
+| general-purpose subagent | $1.50 | +17.0% (+1.3% to +33.3%) | 35.7k / 35.7k | 0 | 16/16 | 5 min |
+| lean custom subagent on Haiku 4.5 | $1.72 | +34.5% (+16.6% to +53.5%) | 33.8k / 33.8k | 0 | 15.7/16 | 19 min |
+
+The main context grows about 5.4k tokens per subtask when the session does the work itself, and
+about 1.3k when a subagent does it (the instruction to the subagent, its short report, a one-line
+reply). Where the lean worker's saving comes from, in the raw logs of one trial: solo writes ~102k
+tokens to the cache at the 1-hour price and re-reads 2.76M; with the lean worker the main session
+writes ~26k and re-reads 0.72M, the workers write ~100k at the 5-minute price (subagents default to
+it, 37.5% cheaper per token) and re-read 0.23M, because each worker starts from a ~5k-token prefix and
+is discarded after its subtask. The general-purpose agent's prefix is ~11k and it wrote 2.9x as much;
+a fork re-reads the parent's whole conversation on every turn (1.5M reads); Haiku took more turns
+(4.3M reads) and missed two subtasks in one session. Part of the lean worker's saving is the cache
+lifetime: a main session set to the 5-minute lifetime (`/xend:stats --cache-ttl`) would pay ~$0.15
+less on its writes, which narrows the gap to roughly 5%; the context stays small either way.
+
 ## How the numbers are made
 
 ```bash

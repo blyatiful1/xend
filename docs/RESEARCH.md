@@ -251,7 +251,46 @@ summary") into both arms; (2) `--allowedTools` pre-approves tools but does not r
 pays the shared prefix's cache write (15k against 3.4k tokens in one pair), so every run now starts
 with one warm-up per arm, run one at a time and through one tool call. The earlier runs (r1-r7) stay
 valid as paired comparisons, but their percentages are relative to a heavier base than a local user
-has; with the local base (~18k cached tokens per call) a fixed plugin prefix weighs more, not less.
+has; with the local base (~18k cached tokens per call) a fixed plugin prefix weighs more, not less. **Update (r15):** the
+denylist still let the cloud host's `MAX_THINKING_TOKENS=31999`, background-task and compaction
+overrides reach every child, and a container with xend enabled in `~/.claude/settings.json` loaded it
+into the baseline arm too. Children now get an allowlisted environment and every r13+ arm passes
+`--setting-sources project,local`; runs up to r14 ran all arms with the host's fixed thinking budget.
+
+**H26. On Sonnet 5.5, orchestrating a single task costs more, whatever the tool.** Mechanism: every
+subagent pays a prefix (a fresh one is written at 1.25x; a fork reads the parent's at 0.1x but re-reads
+the parent's whole conversation every turn) and the parent pays turns to brief and integrate, while
+Sonnet 5.5 writes a six-module package in one turn of parallel tool calls and finishes a project task
+in about four turns. → *(measured here, r13 and r14, Claude Code 2.1.287, 3-4 project tasks, one trial
+per arm, every arm 100% of hidden tests)*: fork subagents +79% to +88%, general-purpose subagents +139% to
++184%, the Workflow tool +186% to +191%, superpowers with subagent-driven development +137%; installed but
+not asked to orchestrate, superpowers (+15%) and oh-my-claudecode autopilot (+19%) spawned nothing and
+cost their prefix, and `--advisor opus` (+21%) never consulted the advisor. No third-party repo found in
+a survey of 20 (claude-flow/Ruflo, oh-my-claudecode, SuperClaude, superpowers, GSD, BMAD, spec-kit, Task
+Master, Serena, context-mode, ...) has a paired measurement against one agent; Ruflo's "30-50% fewer
+tokens" is a hard-coded counter (its issue #1514). → **Grade A for the negative result at this task
+size.** → Status: xend does not orchestrate single tasks; architect mode stays opt-in.
+
+**H27. In a long session of independent subtasks, a lean subagent per subtask keeps the main context
+small and costs less.** Mechanism: in a long session the main conversation is re-read on every turn
+and written at the 1-hour cache price, so each subtask's reading is paid again on every later turn
+until compaction (a paid summarization and a cold cache). A subagent does the subtask in a disposable
+context written at the 5-minute price and returns a short report; with a small prefix (a few tools, a
+short prompt) its fixed cost is ~5k tokens. → *(measured here, r15, `bench/session.js`, 16 subtasks per
+session, 6 arms x 6 trials, autocompact window 100k)*: a lean custom subagent **-16.7% (95% CI -25.9% to
+-5.2%)** against the session doing the work itself, main context 33k after 16 subtasks against a 66k
+peak with 1.33 compactions, 16/16 subtasks in every session; a fork -4.9% (CI -15.2% to +8.0%); a
+general-purpose subagent +17.0% (CI +1.3% to +33.3%); the same lean subagent on Haiku 4.5 +34.5%, 4x
+slower, two subtasks missed in one session; `/clear` between subtasks +3.8% (ns). Main context grew
+~1.3k tokens per delegated subtask against ~5.4k when done in place. The lean-versus-general-purpose
+gap (-29%) is the `tools:` allowlist and a short prompt (H23, measured here for the first time): the
+general-purpose prefix is ~11k against ~5k, and it wrote 2.9x as much. Part of the saving against solo
+is the cache lifetime (subagents write at 5 minutes by default); with the main session also at 5 minutes
+the gap narrows to roughly 5%, while the context and compaction difference stays. → **Grade B** (one task
+family, one model, one window size; the window was scaled down so compaction happens within 16
+subtasks). → Status: candidate for xend (a shipped lean worker plus an opt-in delegation rule for long
+sessions); not shipped until the plugin-agent version is measured, since plugin agents ignore some
+frontmatter (H23) and models do not delegate unprompted (H22).
 
 ## 4. Rejected or deferred
 
@@ -276,6 +315,9 @@ has; with the local base (~18k cached tokens per call) a fixed plugin prefix wei
 | Automatic `/compact` at low thresholds | Compaction is a paid summarization pass plus a cold cache; Anthropic recommends clearing rarely and in large batches. xend prefers checkpoint + `/clear` and, in `aggressive`, infrequent server-side clearing. |
 | A `SubagentStop` verdict delivered via `hookSpecificOutput.additionalContext` | Reaches the parent, but *(verified here)* the subagent itself keeps replying to it — nine extra stops observed before a cap. `decision: block` with a reason makes it restate once cleanly instead; xend uses only `decision: block`. |
 | A verifier living in `PostToolUse(Agent)` | The `Agent` tool is asynchronous in this build *(verified here, Claude Code 2.1.272)*: `PostToolUse(Agent)` fires at launch with `tool_response.status: "async_launched"` and no result to check. `SubagentStop` is the only hook that ever sees the subagent's final reply, so the verifier lives there instead. |
+| Haiku workers for delegated coding subtasks | r15: +34.5% against solo and 4x slower, more turns per subtask (4.3M cache reads against 0.23M for a Sonnet worker), two subtasks missed in one of six sessions (H27). Cheaper per token, dearer per subtask. |
+| General-purpose subagents as the delegation target | r15: +17.0% against solo and +40% against a lean custom subagent doing the same work; the ~11k-token prefix and broader exploration are the difference (H27). |
+| The Workflow tool or agent teams to save tokens | r13/r14: +186% to +191% on project tasks; Anthropic's own docs say workflows "can use meaningfully more tokens" and teams ~7x. Useful for scale or wall time, not for cost (H26). |
 | A soft `PreToolUse` gate that names its own escape hatch (`plan off`) | *(verified here)*: the model used exactly the exit it was told about and finished the task directly (11 turns, one denial, $0.18) instead of planning. See H22. The shipped gate never advertises a way to disable itself. |
 
 ## 5. What xend adds that did not exist as a package
