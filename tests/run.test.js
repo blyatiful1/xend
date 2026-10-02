@@ -146,10 +146,10 @@ test('cleanEnv: an ambient cache-lifetime setting never reaches an arm unless th
 
 test('cleanEnv: only allowlisted host variables reach a child; host thinking, background and session settings never do', () => {
   const { cleanEnv } = require('../bench/run.js');
-  const host = { PATH: '/bin', HOME: '/root', HTTPS_PROXY: 'http://p', MAX_THINKING_TOKENS: '31999', CLAUDE_AUTO_BACKGROUND_TASKS: 'true',
+  const host = { PATH: '/bin', HOME: '/root', HTTPS_PROXY: 'http://p', ANTHROPIC_API_KEY: 'k', MAX_THINKING_TOKENS: '31999', CLAUDE_AUTO_BACKGROUND_TASKS: 'true',
     CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '80', CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'remote', XEND_PROFILE: 'aggressive' };
   const e = cleanEnv({ XEND_PROFILE: 'balanced' }, host);
-  assert.deepStrictEqual(e, { PATH: '/bin', HOME: '/root', HTTPS_PROXY: 'http://p', XEND_PROFILE: 'balanced' });
+  assert.deepStrictEqual(e, { PATH: '/bin', HOME: '/root', HTTPS_PROXY: 'http://p', ANTHROPIC_API_KEY: 'k', XEND_PROFILE: 'balanced' });
 });
 
 test('normalizeArm keeps per-arm claude args; parseArgs flags --help and refuses unknown arguments', () => {

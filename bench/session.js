@@ -86,12 +86,12 @@ function normalizeSessionArm(a, defaults) {
 // Pure: the claude argument list for one process of a session. --max-turns and --max-budget-usd bound
 // a process, so they are scaled to the messages that process will receive: a continuous session and
 // sixteen /clear processes then share one effective budget (task.max_turns and task.budget_usd are
-// per session; a clear-mode process gets 1/n of each, with at least 40 turns).
+// per session; a clear-mode process gets 1/n of each).
 function sessionArgs(task, arm, opts) {
   const ta = run.toolArgs((task.tools || 'Bash,Read,Edit,Write,MultiEdit,Grep,Glob') + (arm.extraTools ? ',' + arm.extraTools : ''), opts.toolset);
   const n = Math.max(1, (task.session || []).length);
   const share = arm.sessionMode === 'clear' ? 1 / n : 1;
-  const turns = Math.max(40, Math.ceil((task.max_turns || 400) * share));
+  const turns = Math.ceil((task.max_turns || 400) * share);
   const budget = Math.round((task.budget_usd || 30) * share * 100) / 100;
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
     '--model', arm.model, '--max-turns', String(turns), '--max-budget-usd', String(budget),
@@ -449,7 +449,8 @@ async function main() {
   const runsPath = path.join(outDir, 'runs.jsonl');
   const done = new Set();
   if (opts.resume && fs.existsSync(runsPath)) {
-    for (const line of fs.readFileSync(runsPath, 'utf8').split('\n')) { try { const r = JSON.parse(line); if (r.complete || r.invalid !== 'rate_limit_rejected') done.add(r.task + '|' + r.arm + '|' + r.trial); } catch (_) {} }
+    // only a complete session counts as done: rate-limited, errored, crashed or timed-out ones run again
+    for (const line of fs.readFileSync(runsPath, 'utf8').split('\n')) { try { const r = JSON.parse(line); if (r.complete) done.add(r.task + '|' + r.arm + '|' + r.trial); } catch (_) {} }
   }
   const jobs = [];
   for (let trial = 1; trial <= opts.runs; trial++) for (const task of tasks) for (const arm of arms) if (!done.has(task.name + '|' + arm.label + '|' + trial)) jobs.push({ task, arm, trial });

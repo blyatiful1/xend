@@ -178,7 +178,11 @@ function prepareFixture(task, workRoot) {
 // host environment minus a short denylist, so their arms all ran with that host's settings.
 const ENV_ALLOW = ['PATH', 'HOME', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'USER', 'TMPDIR', 'TZ',
   'HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy', 'NO_PROXY', 'no_proxy', 'GLOBAL_AGENT_HTTPS_PROXY', 'GLOBAL_AGENT_NO_PROXY',
-  'SSL_CERT_FILE', 'NODE_EXTRA_CA_CERTS', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'PIP_CERT', 'GIT_SSL_CAINFO'];
+  'SSL_CERT_FILE', 'NODE_EXTRA_CA_CERTS', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', 'PIP_CERT', 'GIT_SSL_CAINFO',
+  // credentials and provider selection, for runners that authenticate from the environment
+  'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_CUSTOM_HEADERS', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR',
+  'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'AWS_REGION', 'AWS_PROFILE', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN',
+  'ANTHROPIC_VERTEX_PROJECT_ID', 'CLOUD_ML_REGION', 'GOOGLE_APPLICATION_CREDENTIALS'];
 
 function cleanEnv(extra, source) {
   source = source || process.env;
