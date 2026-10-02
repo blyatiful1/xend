@@ -268,7 +268,15 @@ not asked to orchestrate, superpowers (+15%) and oh-my-claudecode autopilot (+19
 cost their prefix, and `--advisor opus` (+21%) never consulted the advisor. No third-party repo found in
 a survey of 20 (claude-flow/Ruflo, oh-my-claudecode, SuperClaude, superpowers, GSD, BMAD, spec-kit, Task
 Master, Serena, context-mode, ...) has a paired measurement against one agent; Ruflo's "30-50% fewer
-tokens" is a hard-coded counter (its issue #1514). → **Grade A for the negative result at this task
+tokens" is a hard-coded counter (its issue #1514). Honey (Green-PT/honey-for-devs 1.3.1, reviewed at
+9169fc5): its headline (-38% output, -24% cost on Opus 5, recomputed and correct) comes from single API
+calls with a warm-cached 5k-token skill prompt and no tools or agent loop, so cost tracks output; billed
+cold it is +20% (ns), on Haiku 4.5 +136% (the prompt is under Haiku's caching minimum), and no committed
+run spawns its "hive" subagents or compares delegation with working inline. Installed, it adds ~2.8k
+tokens to every session (measured here: 8,307 against 5,548 cache-write tokens on the same probe), mostly
+14 skill and 3 agent descriptions that stay listed even with the skill off. Its own data supports this
+document's prefix-tax and no-instruction-compression findings. Worth measuring from it: a `SubagentStart`
+hook that tells every subagent to report tersely (it costs the main context nothing). → **Grade A for the negative result at this task
 size.** → Status: xend does not orchestrate single tasks; architect mode stays opt-in.
 
 **H27. In a long session of independent subtasks, a lean subagent per subtask keeps the main context
