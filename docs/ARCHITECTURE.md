@@ -93,7 +93,8 @@ that is about 2.4x the input price per token before the model has done anything,
 block was cut from **2,869 B** (plus five agent descriptions and a routing skill: ~1,400
 cache-write tokens of plugin prefix per session, measured through a request-logging proxy and the
 bench warm-up) to **709 B** at `balanced` (~413 cache-write tokens per session including the two
-builder descriptions). Contents, in order:
+builder descriptions; ~466 since 0.5.0 added the `xend-subtask` listing, bench r16 warm-up).
+Contents, in order:
 
 - a one-line header naming the profile, terse level and lean level;
 - the terse rules for the active level, with the one exemption that matters (normal prose for
@@ -170,10 +171,25 @@ of a `claude --agent` session, which gets the auto-test), and is off in `lite`.
 
 ## Delegation (L3)
 
-Only the two architect-mode builders ship as plugin agents: `xend-worker-lite` (Haiku, one
-mechanical fully-specified change) and `xend-worker` (Sonnet, one fully specified task). Their
-descriptions say to use them only for `plan next` briefs, so outside architect mode they cost two
-short lines of agent listing and nothing else. `xend-scout`, `xend-reader` and `xend-reviewer` moved
+Three agents ship as plugin agents: the two architect-mode builders, `xend-worker-lite` (Haiku, one
+mechanical fully-specified change) and `xend-worker` (Sonnet, one fully specified task), and
+`xend-subtask` for delegate mode. Their descriptions say when to use them (`plan next` briefs;
+delegate mode only), so with both modes off they cost three short lines of agent listing (~50
+tokens for `xend-subtask`, measured in the bench r16 warm-up) and nothing else.
+
+Delegate mode (`delegate`, off by default; `/xend:delegate on`, `XEND_DELEGATE=1`, `.xend.json`) is
+for long sessions of independent subtasks. When it is on, `scripts/lib/context.js` appends one
+paragraph (`DELEGATE`) to the session block: each self-contained subtask goes to `xend-subtask`
+with the request and any context it needs as the prompt, and quick questions are answered
+directly. `xend-subtask` runs on the caller's model (`model: inherit`) with Bash, Read, Edit,
+Write, Grep and Glob and a five-line prompt, does the whole subtask in its own context and replies
+in three lines, so a subtask adds ~1.3k tokens to the main context instead of the ~5k its reading
+would. The mode is a session override (`state.setSessionOverride(dir, 'delegate', …)`) that
+`scripts/session-start.js` applies again after `/clear` and compaction; `/xend:delegate` prints the
+rule because the block itself is only built at session start. Architect mode takes precedence
+(`context.build` emits only one of the two rules). `xend-subtask` is not in the verifier's
+`KIND_MAP`: its reply is free-form, so the architect reply contract does not apply to it. Measured
+in `docs/RESEARCH.md` H27 (bench r15 and r16). `xend-scout`, `xend-reader` and `xend-reviewer` moved
 to `extras/agents/`: plain xend spawned none of them on any project-bench task (r6, r7b), and every
 plugin agent is listed in every session. Copied into `~/.claude/agents/` or `.claude/agents/` they
 work as before, the SubagentStop verifier still checks their citations by name, and — unlike

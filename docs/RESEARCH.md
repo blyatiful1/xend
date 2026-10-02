@@ -297,9 +297,15 @@ general-purpose prefix is ~11k against ~5k, and it wrote 2.9x as much. Part of t
 is the cache lifetime (subagents write at 5 minutes by default); with the main session also at 5 minutes
 the gap narrows to roughly 5%, while the context and compaction difference stays. → **Grade B** (one task
 family, one model, one window size; the window was scaled down so compaction happens within 16
-subtasks). → Status: candidate for xend (a shipped lean worker plus an opt-in delegation rule for long
-sessions); not shipped until the plugin-agent version is measured, since plugin agents ignore some
-frontmatter (H23) and models do not delegate unprompted (H22).
+subtasks). → **Update (r16, the shipped plugin):** `/xend:delegate on` (an `xend-subtask` plugin agent on the
+caller's model plus one session-block paragraph) against plain Claude Code on the same 16-subtask
+sessions, 6 paired sessions per arm: **-50.0% tokens (95% CI -54.8% to -42.9%)**, -16.7% cost (CI
+-30.0% to 0.0%), 0 compactions against 2.0, every subtask fixed; xend as shipped without it: -14.6%
+cost (CI -23.6% to -3.0%), -14.9% tokens. Delegate mode against xend without it: -41.2% tokens (CI
+-47.6% to -30.8%), cost -2.5% (CI -14.1% to +18.5%). The plugin agent delegated every subtask as
+instructed, ran on the caller's model and needed no frontmatter it ignores. → Status: shipped
+opt-in in 0.5.0 (`/xend:delegate on`); a token saving at equal quality, not yet a confident cost
+saving against xend without it, and a cost on single tasks (H26), so not a default.
 
 ## 4. Rejected or deferred
 

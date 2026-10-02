@@ -3,6 +3,34 @@
 Claude Code updates an installed plugin only when this version changes, so every release that
 changes `scripts/`, `hooks/`, `agents/` or `skills/` bumps it.
 
+## 0.5.0 — 2026-10-02
+
+### Delegate mode for long sessions (opt-in)
+
+- `/xend:delegate on` (or `XEND_DELEGATE=1`, or `{"delegate": true}` in `.xend.json`) adds one
+  paragraph to the session block: hand each self-contained subtask the user gives to the new
+  `xend-subtask` agent, answer quick questions directly. `xend-subtask` runs on the caller's model
+  with Bash, Read, Edit, Write, Grep and Glob and replies in three lines. The setting survives
+  `/clear` and compaction; architect mode takes precedence when both are on.
+- Measured on Claude Sonnet 5.5 with 16 independent subtasks sent one after another into one
+  session (`bench/session.js`, bench r16, 6 paired sessions per arm, every subtask done in every
+  session): against plain Claude Code, xend as shipped cost **-14.6%** (95% CI -23.6% to -3.0%)
+  and used 15% fewer tokens; with delegate mode on, **-50.0% tokens** (CI -54.8% to -42.9%) and
+  -16.7% cost (CI -30.0% to 0.0%), and the main context never compacted (2.0 compactions per
+  session for plain Claude Code, 1.67 for xend). Against xend without it, delegate mode saves 41%
+  of tokens, and its cost change is within noise (-2.5%, CI -14.1% to +18.5%), so it stays opt-in.
+- The new agent's one-line description adds ~50 tokens to every session; turning the mode on adds
+  ~130 more.
+
+### Bench
+
+- `bench/session.js` replays a list of messages as one long session and records the main context
+  after each, compactions, cost per message and subtask-level quality; `bench/analyze-session.js`
+  reports it paired by trial. `session-multifix-16` is its first task.
+- Children run with an allowlisted environment: a cloud host's `MAX_THINKING_TOKENS`,
+  background-task and compaction overrides no longer reach any arm.
+- Orchestration results on Sonnet 5.5 (r13-r15) are in `docs/RESULTS.md`.
+
 ## 0.4.0 — 2026-09-28
 
 ### Cache lifetime

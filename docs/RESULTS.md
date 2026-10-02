@@ -154,6 +154,23 @@ a fork re-reads the parent's whole conversation on every turn (1.5M reads); Haik
 lifetime: a main session set to the 5-minute lifetime (`/xend:stats --cache-ttl`) would pay ~$0.15
 less on its writes, which narrows the gap to roughly 5%; the context stays small either way.
 
+**Delegate mode, as shipped (r16).** The same 16-subtask sessions with the plugin itself: plain
+Claude Code, xend 0.5.0 as shipped (delegate mode off) and xend with `/xend:delegate on`
+(`XEND_DELEGATE=1`), 6 paired sessions per arm, every session complete:
+
+| Arm | Cost per session | vs plain Claude Code (95% CI) | Tokens | vs plain | Main context, peak / end | Compactions | Subtasks fixed |
+|---|---|---|---|---|---|---|---|
+| plain Claude Code | $1.53 | | 3.47M | | 66.3k / 45.9k | 2.00 | 16/16 |
+| xend as shipped | $1.30 | **-14.6% (-23.6% to -3.0%)** | 2.95M | -14.9% (-19.3% to -9.9%) | 66.4k / 46.0k | 1.67 | 16/16 |
+| xend, delegate mode | $1.27 | -16.7% (-30.0% to 0.0%) | 1.73M | **-50.0% (-54.8% to -42.9%)** | 34.5k / 34.5k | 0 | 16/16 |
+
+Against xend without it, delegate mode used 41.2% fewer tokens (CI -47.6% to -30.8%) at a cost change
+within noise (-2.5%, CI -14.1% to +18.5%): one session spent $0.47 on the 6,400-line module, where
+the first worker stopped short and the main session sent a second. It stays opt-in: it changes how
+every subtask is handled, and on single tasks delegation costs more (above). The warm-ups put xend's
+per-session prefix at 466 cache-write tokens (the new agent listing included) and delegate mode's
+paragraph at 134 more.
+
 ## How the numbers are made
 
 ```bash
