@@ -347,7 +347,8 @@ function taskChecks(task, work) {
   const scorer = path.join(task.dir, 'score.py');
   if (!fs.existsSync(scorer)) return null;
   try {
-    const out = execFileSync('python3', [scorer, work, task.dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300000 });
+    // headroom over the scorer's own limits (score.py: gen.sh 60 s + two pytest runs of 90 s each)
+    const out = execFileSync('python3', [scorer, work, task.dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000 });
     return JSON.parse(out.trim().split('\n').pop());
   } catch (err) { return { error: String(err.message || err).slice(0, 300) }; }
 }

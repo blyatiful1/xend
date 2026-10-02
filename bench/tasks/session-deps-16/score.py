@@ -37,7 +37,7 @@ def pytest_outcomes(cwd, test_file):
     """{test name: 'passed'|'failed'|'error'} from one quiet pytest run with per-test report lines."""
     try:
         out = subprocess.run([sys.executable, '-m', 'pytest', '-q', '-rA', '-p', 'no:cacheprovider', test_file],
-                             cwd=cwd, capture_output=True, text=True, timeout=120).stdout
+                             cwd=cwd, capture_output=True, text=True, timeout=90).stdout
     except subprocess.TimeoutExpired:
         return {}
     res = {}
@@ -71,19 +71,24 @@ def main():
     out['regress_present'] = len(present)
     out['regress_pass_fixed'] = out['regress_valid'] = 0
     if present:
+        # Graded in copies of the whole work dir (its tests/ package, conftest.py and pytest config
+        # included, so a regression test may reuse the session's own helpers): once as the session left
+        # it, once with kit/ rebuilt from the original buggy modules by the fixture's gen.sh.
         fixed_dir = tempfile.mkdtemp(prefix='deps-fixed-')
         old_dir = tempfile.mkdtemp(prefix='deps-old-')
         try:
-            shutil.copytree(os.path.join(work, 'kit'), os.path.join(fixed_dir, 'kit'))
-            shutil.copy(reg, os.path.join(fixed_dir, 'test_regressions.py'))
-            shutil.copytree(os.path.join(task_dir, 'fixture', 'kit'), os.path.join(old_dir, 'kit'))
+            ignore = shutil.ignore_patterns('.xend_hidden_tests', '__pycache__', '.pytest_cache')
+            shutil.copytree(work, fixed_dir, dirs_exist_ok=True, ignore=ignore)
+            shutil.copytree(work, old_dir, dirs_exist_ok=True, ignore=ignore)
             subprocess.run(['bash', os.path.join(task_dir, 'fixture', 'gen.sh')], cwd=old_dir, check=True,
                            capture_output=True, timeout=60)
-            shutil.copy(reg, os.path.join(old_dir, 'test_regressions.py'))
-            fixed = pytest_outcomes(fixed_dir, 'test_regressions.py')
-            old = pytest_outcomes(old_dir, 'test_regressions.py')
+            target = os.path.join('tests', 'test_regressions.py')
+            fixed = pytest_outcomes(fixed_dir, target)
+            old = pytest_outcomes(old_dir, target)
             out['regress_pass_fixed'] = sum(1 for t in present if fixed.get(t) == 'passed')
             out['regress_valid'] = sum(1 for t in present if fixed.get(t) == 'passed' and old.get(t) in ('failed', 'error'))
+        except Exception as err:  # keep every other number; the regression counts stay 0
+            out['regress_error'] = str(err)[:300]
         finally:
             shutil.rmtree(fixed_dir, ignore_errors=True)
             shutil.rmtree(old_dir, ignore_errors=True)
