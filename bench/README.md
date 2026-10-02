@@ -139,6 +139,14 @@ not find the bug, and a prompt that says there is no reference copy (an r14 trac
 diffing every module against `/usr/lib/python3.x`). Each session subtask also asks for a read-through
 of the module, so the session carries real reading.
 
+`session-deps-16` (same builder) asks whether a long session keeps what only the conversation said:
+the same sixteen subtasks, a rule and a release tag in the first message, a second rule in the sixth
+(a regression test per fix), and a seventeenth message that asks for the tag, a detail of subtask 2
+and the list of fixes. A task can ship a `score.py`; `session.js` runs it as
+`python3 score.py <work dir> <task dir>` after each session and stores the JSON it prints under
+`task_checks`, which `analyze-session.js` reports per arm. Its regression-test check runs each test
+on the session's code and on the original modules rebuilt by the fixture's `gen.sh`.
+
 ## What is recorded per run
 
 Pass/fail from `test.sh` (plus `score`/`score_passed`/`score_total` when `test.sh` prints a `SCORE:` line — see above), the four token meters of the main context (`input`, `cache_creation`, `cache_read`, `output`), the same summed over all models including subagents, uncached input, turns, wall time, cost as reported by Claude Code, the models used, `model_usage` (per-model token/cost breakdown from `modelUsage`), `cost_main_usd`/`cost_sub_usd` (cost split between the arm's own model and everything else — subagents), `subagent_stats` (spawned/completed/failed counts, when the run spawned any), `arm_kind`/`arm_model`/`arm_mode` alongside the arm's `label`, and what xend shaping did (count of shaped results, chars before and after, transform kinds). Raw result JSON is kept under `raw/`.

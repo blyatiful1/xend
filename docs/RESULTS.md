@@ -171,6 +171,34 @@ every subtask is handled, and on single tasks delegation costs more (above). The
 per-session prefix at 466 cache-write tokens (the new agent listing included) and delegate mode's
 paragraph at 134 more.
 
+**Does a small context lose what the conversation said? (r17).** Delegation keeps the main context
+small because the work happens elsewhere, so a worker sees only what the main session passes on. The
+`session-deps-16` sessions are the same sixteen subtasks plus rules and facts that exist only in the
+conversation: the first message says to log every fix in `CHANGES.txt` and gives a release tag to
+recall at the end; the sixth adds a rule (a regression test per fix, failing on the old code); a
+seventeenth asks for `RELEASE.txt` with the tag, the name of the helper fixed in subtask 2, and every
+module fixed. `score.py` grades each, and runs each regression test against the session's code and
+against the original buggy modules. 6 paired sessions per arm, every session complete:
+
+| Arm | Cost per session | vs plain Claude Code (95% CI) | Tokens | vs plain | Main context, peak / end | Compactions | Subtasks fixed | Rules and facts |
+|---|---|---|---|---|---|---|---|---|
+| plain Claude Code | $1.86 | | 3.87M | | 66.6k / 36.3k | 2.67 | 16/16 | all, 6 of 6 |
+| xend as shipped | $1.61 | -13.8% (-23.4% to +1.3%) | 3.57M | -7.9% (-13.0% to -2.5%) | 66.8k / 41.7k | 2.00 | 16/16 | all, 6 of 6 |
+| xend, delegate mode | $1.58 | **-15.4% (-24.5% to -3.6%)** | 2.14M | **-44.8% (-51.5% to -37.5%)** | 41.2k / 41.2k | 0 | 16/16 | all, 6 of 6 |
+
+"All" is every check at its maximum: 16 of 16 fixes in `CHANGES.txt`, the tag and the helper's name
+right, 16 of 16 modules in `RELEASE.txt`, and 11 of 11 regression tests present, passing on the fixed
+code and failing on the buggy code. In delegate mode the main session copied the `CHANGES.txt` rule
+into every worker's prompt and the regression rule into exactly the 11 prompts after it was given,
+kept the tag to itself and wrote `RELEASE.txt` itself; the helper's name came back in the worker's
+three-line reply. Plain Claude Code and xend compacted two or three times per session, and the
+summaries carried the rules, the tag and the helper's name. So at this length neither compaction nor
+delegation lost anything, and the test sits at its ceiling: it shows delegate mode costs no quality
+when what later steps need was stated as a rule or a fact, not that it would hold for an incidental
+detail of a tool output many subtasks back. Against xend without it, delegate mode used 40.1% fewer
+tokens (CI -44.3% to -35.9%) at a cost change within noise (-1.9%, CI -8.4% to +5.4%), as in r16; its
+sessions took 6.5 minutes against 6.2 for plain Claude Code, since workers run one at a time.
+
 ## How the numbers are made
 
 ```bash

@@ -3,6 +3,16 @@
 Claude Code updates an installed plugin only when this version changes, so every release that
 changes `scripts/`, `hooks/`, `agents/` or `skills/` bumps it.
 
+## Unreleased
+
+### Bench
+
+- `session-deps-16`: a long session whose later steps depend on rules and facts given only in the
+  conversation, graded by the task's own `score.py` (`task_checks` in `session.js`). Bench r17:
+  plain Claude Code, xend and xend in delegate mode kept every rule and fact in 6 of 6 sessions;
+  delegate mode used 44.8% fewer tokens than plain Claude Code (CI -51.5% to -37.5%) at -15.4% cost
+  (CI -24.5% to -3.6%).
+
 ## 0.5.0 — 2026-10-02
 
 ### Delegate mode for long sessions (opt-in)
