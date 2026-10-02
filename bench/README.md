@@ -61,7 +61,7 @@ An arm is either the legacy bare label (`baseline`, `xend` — kind = label, mod
 the previous release and the working tree run in the same paired pass (`git worktree add ../xend-main
 origin/main`, then `--arms "baseline,old:xend@../xend-main:sonnet,new:xend:sonnet"`). For per-arm
 environment (ablations such as auto-test off) use `--arms-file`, a JSON array of `{label, kind, model,
-mode, pluginDir, env, args}`:
+mode, pluginDir, env, args, promptSuffix, extraTools}`:
 
 ```json
 [{"label": "baseline", "kind": "baseline"},
@@ -70,7 +70,10 @@ mode, pluginDir, env, args}`:
 ```
 
 An entry's `env` reaches its arm whatever its kind, so two plain Claude Code arms can differ in one
-Claude Code setting; `args` are extra `claude` arguments for that arm. The cache-lifetime runs
+Claude Code setting; `args` are extra `claude` arguments for that arm. `promptSuffix` is appended
+to every task prompt in that arm (an orchestration request as a user would type it, such as "use a
+workflow"), and `extraTools` adds tools to that arm's set (`"Workflow"`); each record keeps the
+suffix in `arm_prompt_suffix`. The orchestration runs (`bench/results/r13-*`) use both. The cache-lifetime runs
 (`bench/results/r12-*`) used a distinct system-prompt line per arm so the arms could not share
 cache entries, and every run records the lifetime its writes were billed at (`cache_write_1h`,
 `cache_write_5m`); an ambient lifetime setting never reaches a child:

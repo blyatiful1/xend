@@ -97,6 +97,14 @@ test('normalizeArm: arms-file entries keep per-arm env and plugin dir, unknown k
     { label: 'x', kind: 'baseline', model: 'haiku', mode: 'plain', env: { A: '1' } });
 });
 
+test('normalizeArm: promptSuffix and extraTools are kept as strings, absent or empty ones are dropped', () => {
+  const a = normalizeArm({ label: 'wf', kind: 'baseline', promptSuffix: 'Use a workflow.', extraTools: 'Workflow' }, { model: 'sonnet' });
+  assert.strictEqual(a.promptSuffix, 'Use a workflow.');
+  assert.strictEqual(a.extraTools, 'Workflow');
+  const b = normalizeArm({ label: 'solo', kind: 'baseline', promptSuffix: '', extraTools: '' }, { model: 'sonnet' });
+  assert.deepStrictEqual(b, { label: 'solo', kind: 'baseline', model: 'sonnet', mode: 'plain' });
+});
+
 test('toolArgs: local toolset makes the available set explicit and pre-approves it plus the task tools', () => {
   const r = toolArgs('Bash,Read,Edit,Write,MultiEdit,Grep,Glob', 'local');
   assert.strictEqual(r.tools, TOOLSETS.local);
