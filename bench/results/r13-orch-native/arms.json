@@ -1,0 +1,10 @@
+[
+ {"label": "solo", "kind": "baseline", "args": ["--setting-sources", "project,local"]},
+ {"label": "fork", "kind": "baseline", "env": {"CLAUDE_CODE_FORK_SUBAGENT": "1"}, "args": ["--setting-sources", "project,local"],
+  "promptSuffix": "Orchestrate this: read the spec yourself, then hand each independent module to a fork subagent (Agent tool, subagent_type \"fork\"; forks inherit your context, so the prompt only says what to build and how to check it). Run independent forks in parallel, then integrate and run the full test suite yourself."},
+ {"label": "fresh-sub", "kind": "baseline", "args": ["--setting-sources", "project,local"],
+  "promptSuffix": "Orchestrate this: read the spec yourself, then hand each independent module to a general-purpose subagent (Agent tool) with a self-contained brief: what to build and how to check it. Run independent subagents in parallel, then integrate and run the full test suite yourself."},
+ {"label": "workflow", "kind": "baseline", "extraTools": "Workflow", "args": ["--setting-sources", "project,local"],
+  "promptSuffix": "Use a workflow to orchestrate this: read the spec yourself, then run a Workflow script whose agents each build one independent module and check it; integrate and run the full test suite yourself afterwards."},
+ {"label": "xend-arch", "kind": "xend", "mode": "architect", "args": ["--setting-sources", "project,local"]}
+]
