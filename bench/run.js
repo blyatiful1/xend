@@ -17,9 +17,10 @@
 // global --model for that arm. mode (xend only) is `architect` (XEND_ARCHITECT=1: main model plans,
 // subagents build) or `plain` (default, XEND_ARCHITECT=0). kind may also be `xend@<dir>` to load the
 // plugin from another checkout (e.g. the previous release), so old and new xend run in one paired pass.
-// --arms-file takes a JSON array of {label, kind, model, mode, pluginDir, env, args}: env is set for
+// --arms-file takes a JSON array of {label, kind, model, mode, pluginDir, env, args, promptSuffix, extraTools}: env is set for
 // that arm whatever its kind (e.g. {"CLAUDE_CODE_PROMPT_CACHE_TTL": "5m"} on a baseline arm), args
-// are extra `claude` arguments. --help prints this; an unknown argument stops before any job runs.
+// are extra `claude` arguments, promptSuffix is appended to the task prompt (an orchestration
+// request the user would type), extraTools adds tools to that arm's set. --help prints this; an unknown argument stops before any job runs.
 //
 // Environment: every child runs as a plain local `claude -p` (the hosting session's entrypoint and
 // session variables are removed) with an explicit, local-like tool set (--toolset local, the default)
@@ -109,6 +110,8 @@ function normalizeArm(a, defaults) {
   if (kind === 'xend' && a.pluginDir) arm.pluginDir = a.pluginDir;
   if (a.env && typeof a.env === 'object') arm.env = Object.assign({}, a.env);
   if (Array.isArray(a.args) && a.args.length) arm.args = a.args.map(String);
+  if (a.promptSuffix) arm.promptSuffix = String(a.promptSuffix);
+  if (a.extraTools) arm.extraTools = String(a.extraTools);
   return arm;
 }
 
@@ -207,9 +210,10 @@ function jobEnv(arm, opts, stateDir, allowedTools) {
 }
 
 function runClaude(task, arm, opts, work, stateDir) {
-  const ta = toolArgs(opts.tools || task.tools || TOOLS, opts.toolset);
+  const ta = toolArgs((opts.tools || task.tools || TOOLS) + (arm.extraTools ? ',' + arm.extraTools : ''), opts.toolset);
   const budget = task.budget_usd != null ? task.budget_usd : opts.maxBudget;
-  const args = ['-p', task.prompt, '--model', arm.model, '--max-turns', String(task.max_turns || 40),
+  const prompt = arm.promptSuffix ? task.prompt + '\n\n' + arm.promptSuffix : task.prompt;
+  const args = ['-p', prompt, '--model', arm.model, '--max-turns', String(task.max_turns || 40),
     '--max-budget-usd', String(budget), '--output-format', 'json', '--allowedTools', ta.allowedTools,
     '--strict-mcp-config', '--no-session-persistence'];
   if (ta.tools) args.push('--tools', ta.tools);
@@ -356,6 +360,7 @@ async function runJob(job, opts, outDir, workRoot) {
     ponytail_strict: arm.kind === 'xend' ? !!opts.ponytailStrict : false,
     arm_env: Object.assign({}, arm.kind === 'xend' ? opts.arm_env || {} : {}, arm.env || {}),
     arm_args: arm.args || null,
+    arm_prompt_suffix: arm.promptSuffix || null,
     answer_chars: (j.result || '').length,
     ts: new Date().toISOString(),
   };
