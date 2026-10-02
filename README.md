@@ -12,12 +12,13 @@ No proxy, no daemon, no database, no account. Node.js 18+ is the only dependency
 
 ## At a glance
 
-Measured in paired runs, the same tasks in every arm of one pass. The first two rows are 0.5.0 on Claude Sonnet 5.5; the rest are Claude Sonnet 5 (plugin rows on 0.3.0; 0.4.0 changes only output shaping, checked on real outputs in the last row):
+Measured in paired runs, the same tasks in every arm of one pass. The first three rows are 0.5.0 on Claude Sonnet 5.5; the rest are Claude Sonnet 5 (plugin rows on 0.3.0; 0.4.0 changes only output shaping, checked on real outputs in the last row):
 
 | Where | Result |
 |---|---|
 | Long sessions (16 independent subtasks in one session, Sonnet 5.5) | **-14.6% per session** against plain Claude Code (95% CI -23.6% to -3.0%), 15% fewer tokens, every subtask done in both (6 paired sessions) |
 | The same long sessions with `/xend:delegate on` | **-50% tokens** (CI -55% to -43%) and -16.7% cost (CI -30.0% to 0.0%) against plain Claude Code; the main context never compacted (2.0 compactions per session without it); every subtask done |
+| Long sessions whose later steps depend on the conversation (rules and facts given early, asked for at the end) | Nothing lost in any arm: every rule followed and every fact recalled in 18 of 18 sessions, compacted or delegated. Delegate mode again **-45% tokens** (CI -52% to -38%) and -15.4% cost (CI -24.5% to -3.6%) |
 | Long builds (multi-file projects, ~25 turns) | **-15.9% per task** against plain Claude Code, every hidden test passing in both (6 paired runs; 95% CI -39.6% to -2.5%) |
 | Short tasks (bugfix, feature, Q&A, ~4 turns) | cost-neutral (-1.2%, CI -4.4% to +3.1%), with the pass rate up from 91.7% to 96.4% and 11.6% fewer output tokens (84 paired runs) |
 | xend 0.3.0 against 0.2.0 | **-9.1%** on short tasks (CI -12.7% to -4.7%) |
@@ -94,7 +95,7 @@ documentation:
 - **Delegate in long sessions, not in single tasks.** In a session that works through many
   independent subtasks, `/xend:delegate on` hands each one to a lean worker on your own model, so
   the main context stays small and stops compacting: half the tokens of plain Claude Code in
-  bench r16. For a single task, any orchestration costs more (+9% to +186% on Sonnet 5.5, whether
+  bench r16, with every rule and fact from earlier in the conversation kept (r17). For a single task, any orchestration costs more (+9% to +186% on Sonnet 5.5, whether
   forks, general-purpose subagents, the Workflow tool or orchestration plugins), and cheap Haiku
   workers cost more too (+35%, slower, a subtask missed).
 

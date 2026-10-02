@@ -303,7 +303,14 @@ sessions, 6 paired sessions per arm: **-50.0% tokens (95% CI -54.8% to -42.9%)**
 -30.0% to 0.0%), 0 compactions against 2.0, every subtask fixed; xend as shipped without it: -14.6%
 cost (CI -23.6% to -3.0%), -14.9% tokens. Delegate mode against xend without it: -41.2% tokens (CI
 -47.6% to -30.8%), cost -2.5% (CI -14.1% to +18.5%). The plugin agent delegated every subtask as
-instructed, ran on the caller's model and needed no frontmatter it ignores. → Status: shipped
+instructed, ran on the caller's model and needed no frontmatter it ignores. → **Update (r17, quality when
+later steps depend on the conversation):** `session-deps-16` adds two standing rules and two facts that
+exist only in the conversation and asks for them at the end. Every arm (plain, xend, delegate mode) kept
+all of them in 6 of 6 sessions: the delegating main session passed each rule into the worker prompts
+that needed it and kept the facts itself, and the compaction summaries of the other arms carried them
+too. Delegate mode against plain: -44.8% tokens (CI -51.5% to -37.5%), -15.4% cost (CI -24.5% to -3.6%);
+against xend: -40.1% tokens, cost -1.9% (CI -8.4% to +5.4%). A ceiling result: it rules out a loss when
+what is needed was stated as a rule or fact, not for incidental details. → Status: shipped
 opt-in in 0.5.0 (`/xend:delegate on`); a token saving at equal quality, not yet a confident cost
 saving against xend without it, and a cost on single tasks (H26), so not a default.
 

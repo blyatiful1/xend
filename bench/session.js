@@ -340,6 +340,19 @@ function scoreSession(task, work, rawDir, tag) {
   return { score_passed: passed, score_total: total, score: total ? passed / total : 0, pass: passed === total ? 1 : 0, per_module: perModule, modules_fixed: fixed.length, modules_total: files.length, fixed };
 }
 
+// A task's own extra grading (score.py in the task dir, run as `python3 score.py <work> <task dir>`,
+// printing one JSON object): for what the hidden tests cannot see, such as rules and facts given only
+// in the conversation (session-deps-16). null when the task has none or the scorer fails.
+function taskChecks(task, work) {
+  const scorer = path.join(task.dir, 'score.py');
+  if (!fs.existsSync(scorer)) return null;
+  try {
+    // headroom over the scorer's own limits (score.py: gen.sh 60 s + two pytest runs of 90 s each)
+    const out = execFileSync('python3', [scorer, work, task.dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000 });
+    return JSON.parse(out.trim().split('\n').pop());
+  } catch (err) { return { error: String(err.message || err).slice(0, 300) }; }
+}
+
 // Commands the session ran (main thread and subagents) that look like reading the standard library.
 function scanReference(rawPath) {
   const hits = [];
@@ -473,6 +486,7 @@ async function main() {
       const res = await runSession(job.task, job.arm, opts, work, path.join(outDir, 'raw', tag + '.jsonl.gz'));
       const test = scoreSession(job.task, work, path.join(outDir, 'raw'), tag);
       rec = summarize(job, opts, res, test, scanReference(path.join(outDir, 'raw', tag + '.jsonl.gz')));
+      rec.task_checks = taskChecks(job.task, work);
       if (res.stats.invalid && /rate_limit|api_error/.test(res.stats.invalid)) halt = res.stats.invalid;
       if (!opts.keep) fs.rmSync(root, { recursive: true, force: true });
     } catch (err) {
@@ -483,11 +497,11 @@ async function main() {
     console.log('[' + String(finishedCount).padStart(3) + '/' + jobs.length + '] ' + job.arm.label.padEnd(12) + ' #' + job.trial +
       (rec.score_total ? ' fixed=' + rec.modules_fixed + '/' + rec.modules_total + ' score=' + rec.score_passed + '/' + rec.score_total : '') +
       (rec.cost_usd != null ? ' $' + rec.cost_usd.toFixed(3) + ' ctx_peak=' + rec.ctx_peak + ' ctx_final=' + rec.ctx_final + ' compactions=' + rec.compactions + ' spawned=' + rec.spawned + ' turns=' + rec.turns + ' ' + Math.round(rec.wall_ms / 1000) + 's' : '') +
-      (rec.reference_hits ? ' REF=' + rec.reference_hits : '') + (rec.complete ? '' : ' INCOMPLETE ' + (rec.invalid || '') + ' ' + String((rec.errors || [])[0] || '').slice(0, 140)));
+      (rec.reference_hits ? ' REF=' + rec.reference_hits : '') + (rec.task_checks ? ' checks=' + JSON.stringify(rec.task_checks) : '') + (rec.complete ? '' : ' INCOMPLETE ' + (rec.invalid || '') + ' ' + String((rec.errors || [])[0] || '').slice(0, 140)));
   });
   if (halt) console.log('HALTED: ' + halt + ' (rerun with --resume once the limit resets)');
   console.log('done -> ' + outDir);
 }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { parseArgs, normalizeSessionArm, sessionArgs, sessionEnv, newStats, accountEvent, runningSubagents, summarize, priceMeters, scoreSession, ENV_ALLOW, STDLIB_RE };
+module.exports = { parseArgs, normalizeSessionArm, sessionArgs, sessionEnv, newStats, accountEvent, runningSubagents, summarize, priceMeters, scoreSession, taskChecks, ENV_ALLOW, STDLIB_RE };
