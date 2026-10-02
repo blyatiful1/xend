@@ -191,8 +191,11 @@ right, 16 of 16 modules in `RELEASE.txt`, and 11 of 11 regression tests present,
 code and failing on the buggy code. In delegate mode the main session copied the `CHANGES.txt` rule
 into every worker's prompt and the regression rule into exactly the 11 prompts after it was given,
 kept the tag to itself and wrote `RELEASE.txt` itself; the helper's name came back in the worker's
-three-line reply. Plain Claude Code and xend compacted two or three times per session, and the
-summaries carried the rules, the tag and the helper's name. So at this length neither compaction nor
+three-line reply. Plain Claude Code compacted two or three times per session and xend one to three
+times, and the summaries carried the rules, the tag and the helper's name. The run's reference scan
+flagged five commands in three sessions (two delegate, one plain); each was `inspect.getsource*` on
+a bench module or an import of `kit.lexer`'s own `shlex` class, and none read or diffed the standard
+library. So at this length neither compaction nor
 delegation lost anything, and the test sits at its ceiling: it shows delegate mode costs no quality
 when what later steps need was stated as a rule or a fact, not that it would hold for an incidental
 detail of a tool output many subtasks back. Against xend without it, delegate mode used 40.1% fewer
